@@ -11,6 +11,8 @@ from catboost import CatBoostRegressor
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 from scipy.optimize import minimize
 import joblib
+import os
+from pathlib import Path
 import warnings
 warnings.filterwarnings('ignore')
 
@@ -352,17 +354,24 @@ def main():
     Hlavní pipeline pro ensemble model
     """
     print("\n" + "=" * 70)
-    print("🚀 ENSEMBLE MODEL TRAINING PIPELINE")
+    print("🚀 ENSEMBLE MODEL TRAINING PIPELINE - WITH WEATHER DATA")
     print("=" * 70)
     
-    # 1. Načíst data
+    # 1. Načíst data S POČASÍM
     print("\n📂 Loading data...")
-    import os
-    # Cesta relativně k src/ adresáři (kde běží skript)
-    data_path = os.path.join(os.path.dirname(__file__), '..', 'data', 'raw', 'techmania_cleaned_master.csv')
+    
+    # Cesta k sloučeným datům (návštěvnost + počasí)
+    script_dir = Path(__file__).parent
+    data_path = script_dir.parent / 'data' / 'processed' / 'techmania_with_weather.csv'
+    
     df = pd.read_csv(data_path)
-    print(f"   Loaded {len(df)} records")
+    print(f"   Loaded {len(df)} records from: {data_path.name}")
     print(f"   Date range: {df['date'].min()} - {df['date'].max()}")
+    
+    # Ověřit, že máme weather data
+    weather_cols = ['temperature_mean', 'precipitation', 'weather_code']
+    has_weather = all(col in df.columns for col in weather_cols)
+    print(f"   Weather data present: {'✅ YES' if has_weather else '❌ NO'}")
     
     # 2. Feature engineering
     df = create_features(df)

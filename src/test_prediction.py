@@ -6,10 +6,10 @@ from predict import load_models, predict_single_date, print_prediction
 
 def test_specific_dates():
     """
-    Testuje predikci na konkrétních datech která NEJSOU v trénovacích datech
+    Testuje predikci na následujících 7 dnech (celý týden)
     """
     print("\n" + "=" * 70)
-    print("🧪 TESTING PREDICTIONS ON UNSEEN DATA")
+    print("🧪 TESTING PREDICTIONS - NEXT 7 DAYS")
     print("=" * 70)
     
     # Načíst modely
@@ -20,24 +20,22 @@ def test_specific_dates():
         print("❌ Models not found. Please train first: python ensemble_model.py")
         return
     
-    # Test data - data která nejsou v trénovacích datech (po 2025-12-31)
-    # Generujeme dynamicky od aktuálního data
+    # Generovat 7 po sobě jdoucích dnů od zítřka
     from datetime import date, timedelta
     today = date.today()
     
-    test_dates = [
-        (today + timedelta(days=1)).strftime('%Y-%m-%d'),  # Následující den
-        (today + timedelta(days=6)).strftime('%Y-%m-%d'),  # Za týden
-        (today + timedelta(days=9)).strftime('%Y-%m-%d'),  # Nejbližší víkend (sobota)
-        '2026-02-14',  # Valentýn
-        '2026-07-15',  # Letní prázdniny
-        '2026-12-24',  # Štědrý den
-    ]
+    test_dates = []
+    for i in range(1, 8):  # 7 dní od zítřka
+        next_date = today + timedelta(days=i)
+        test_dates.append(next_date.strftime('%Y-%m-%d'))
+    
+    print(f"\n📅 Predikce od {test_dates[0]} do {test_dates[-1]}")
+    print("=" * 70)
     
     results = []
     
     for date_str in test_dates:
-        print("\n" + "=" * 70)
+        print("\n" + "-" * 70)
         try:
             result = predict_single_date(date_str, models)
             print_prediction(result)
@@ -45,23 +43,49 @@ def test_specific_dates():
             results.append({
                 'date': date_str,
                 'prediction': result['ensemble_prediction'],
-                'day': result['day_of_week']
+                'day': result['day_of_week'],
+                'weather_desc': result['weather']['description'],
+                'temp': result['weather']['temperature'],
+                'precip': result['weather']['precipitation'],
+                'rain': result['weather']['rain'],
+                'snow': result['weather']['snowfall']
             })
         except Exception as e:
             print(f"❌ Error predicting {date_str}: {e}")
     
     # Shrnutí
-    print("\n" + "=" * 70)
-    print("📊 SUMMARY OF PREDICTIONS")
-    print("=" * 70)
-    print(f"\n{'Date':<15} {'Day':<12} {'Predicted Visitors':>20}")
-    print("-" * 70)
-    for r in results:
-        print(f"{r['date']:<15} {r['day']:<12} {r['prediction']:>20}")
+    print("\n" + "=" * 110)
+    print("📊 SUMMARY - WEEKLY PREDICTIONS WITH WEATHER")
+    print("=" * 110)
+    print(f"\n{'Date':<12} {'Day':<10} {'Visitors':>8}  {'Weather':<35} {'Temp':>6}  {'Srážky':>7}")
+    print("-" * 110)
     
-    print("\n" + "=" * 70)
+    total = 0
+    for r in results:
+        # Zkrátit popis počasí pokud je moc dlouhý
+        weather_short = r['weather_desc'][:33] + '..' if len(r['weather_desc']) > 35 else r['weather_desc']
+        
+        # Ikony pro srážky
+        precip_str = ""
+        if r['snow'] > 0:
+            precip_str = f"❄️ {r['snow']:.1f}mm"
+        elif r['rain'] > 0:
+            precip_str = f"🌧️ {r['rain']:.1f}mm"
+        elif r['precip'] > 0:
+            precip_str = f"💧 {r['precip']:.1f}mm"
+        else:
+            precip_str = "☀️ 0mm"
+        
+        print(f"{r['date']:<12} {r['day']:<10} {r['prediction']:>8}  {weather_short:<35} {r['temp']:>5.1f}°C  {precip_str:>7}")
+        total += r['prediction']
+    
+    print("-" * 110)
+    print(f"{'TOTAL (7 days)':<22} {total:>8}")
+    print(f"{'AVERAGE/day':<22} {total/len(results):>8.0f}")
+    
+    print("\n" + "=" * 110)
     print("✅ TESTING COMPLETE!")
-    print("=" * 70)
+    print("=" * 110)
 
 
 def test_single_custom_date():

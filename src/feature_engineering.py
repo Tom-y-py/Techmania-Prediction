@@ -105,6 +105,23 @@ def create_features(df: pd.DataFrame) -> pd.DataFrame:
     df['month_sin'] = np.sin(2 * np.pi * df['month'] / 12)
     df['month_cos'] = np.cos(2 * np.pi * df['month'] / 12)
     
+    # === WEATHER FEATURES ===
+    # Pokud data obsahují weather sloupce, použijeme je přímo
+    weather_cols = [
+        'temperature_max', 'temperature_min', 'temperature_mean',
+        'apparent_temp_max', 'apparent_temp_min', 'apparent_temp_mean',
+        'precipitation', 'rain', 'snowfall', 'precipitation_hours',
+        'weather_code', 'wind_speed_max', 'wind_gusts_max', 'wind_direction',
+        'sunshine_duration', 'daylight_duration',
+        'is_rainy', 'is_snowy', 'is_windy', 'is_nice_weather', 'sunshine_ratio'
+    ]
+    
+    weather_present = [col for col in weather_cols if col in df.columns]
+    if weather_present:
+        print(f"  ✓ Weather features ({len(weather_present)} sloupců): {', '.join(weather_present[:5])}...")
+    else:
+        print("  ⚠️ Weather features nejsou v datech - byly přeskočeny")
+    
     print(f"✅ Created {len(df.columns)} features total")
     
     return df
@@ -195,13 +212,25 @@ def get_feature_columns(df: pd.DataFrame) -> list:
 if __name__ == '__main__':
     # Test feature engineering
     print("=" * 60)
-    print("Testing Feature Engineering")
+    print("Testing Feature Engineering with Weather Data")
     print("=" * 60)
     
-    # Načíst data
-    df = pd.read_csv('data/raw/techmania_cleaned_master.csv')
-    print(f"\n📂 Loaded {len(df)} records")
+    # Načíst data S POČASÍM (již sloučená návštěvnost + počasí)
+    import os
+    from pathlib import Path
+    
+    # Získat správnou cestu (src složka -> parent -> data)
+    script_dir = Path(__file__).parent
+    data_file = script_dir.parent / 'data' / 'processed' / 'techmania_with_weather.csv'
+    
+    df = pd.read_csv(data_file)
+    print(f"\n📂 Loaded {len(df)} records from: {data_file.name}")
     print(f"   Date range: {df['date'].min()} - {df['date'].max()}")
+    
+    # Ukázat, že máme weather data
+    weather_cols = ['temperature_mean', 'precipitation', 'is_rainy', 'is_snowy']
+    present_weather = [col for col in weather_cols if col in df.columns]
+    print(f"   Weather columns present: {present_weather}")
     
     # Vytvořit features
     df = create_features(df)
@@ -215,5 +244,7 @@ if __name__ == '__main__':
     print("\n" + "=" * 60)
     print("✅ Feature Engineering Test Complete!")
     print("=" * 60)
-
+    
+    print("\n📋 Všechny sloupce:")
     print(df.columns.tolist())
+    print(f"   Total features: {len(feature_cols)}")
