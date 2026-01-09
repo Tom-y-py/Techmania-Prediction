@@ -19,21 +19,6 @@
 
 ---
 
-## 🤔 NLP vs. Jiný přístup - VERDIKT
-
-### ❌ **NLP (Natural Language Processing) NENÍ vhodné řešení**
-
-**Důvody:**
-1. **NLP se zabývá zpracováním textu** - analyzuje, rozumí a generuje lidský jazyk
-2. **Naše úloha je čistě numerická/časová predikce** - pracujeme s číselnou časovou řadou
-3. **Nemáme žádná textová data** k analýze (kromě názvů sloupců a dnů v týdnu)
-
-### ✅ **Správný přístup: TIME SERIES FORECASTING + MACHINE LEARNING**
-
-Toto je klasický problém **predikce časových řad s externími faktory**.
-
----
-
 ## 🎯 Doporučené řešení
 
 ### **Typ úlohy:** Regrese časových řad (Time Series Regression)
@@ -280,11 +265,6 @@ Techmania/
 │   │   └── techmania_features.csv
 │   └── external/
 │       └── weather_data.csv (optional)
-├── notebooks/
-│   ├── 01_eda.ipynb
-│   ├── 02_feature_engineering.ipynb
-│   ├── 03_modeling.ipynb
-│   └── 04_evaluation.ipynb
 ├── src/
 │   ├── data_processing.py
 │   ├── feature_engineering.py
@@ -293,7 +273,9 @@ Techmania/
 ├── models/
 │   └── best_model.pkl
 ├── app/
-│   └── streamlit_app.py
+│   ├── app.py
+│   └── templates/
+│       └── index.html
 ├── requirements.txt
 ├── README.md
 └── plan_reseni.md (tento soubor)
@@ -349,17 +331,6 @@ from sklearn.model_selection import train_test_split
 ---
 
 ## 🎓 Závěr a doporučení
-
-### **✅ ANO - Projekt má smysl**
-- Máte dostatečně velká data (10 let)
-- Jasně definovaný cíl
-- Praktické využití
-- Měřitelné výsledky
-
-### **❌ NE - NLP není správný přístup**
-- Použijte **Machine Learning pro časové řady**
-- Konkrétně: **Random Forest** nebo **XGBoost**
-- Případně: **Prophet** (velmi user-friendly)
 
 ### **🎯 Doporučení pro start:**
 1. Začněte s **Random Forest** - nejjednodušší a velmi efektivní
