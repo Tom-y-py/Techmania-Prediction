@@ -1,19 +1,18 @@
 """
-Ensemble Model - LightGBM + Prophet + Neural Network
+Ensemble Model - LightGBM + XGBoost + CatBoost
 Hlavní implementace pro trénování a kombinaci modelů
 """
 
 import pandas as pd
 import numpy as np
 import lightgbm as lgb
-from prophet import Prophet
-import tensorflow as tf
-from tensorflow import keras
-from tensorflow.keras import layers
-from sklearn.preprocessing import StandardScaler
+import xgboost as xgb
+from catboost import CatBoostRegressor
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 from scipy.optimize import minimize
 import joblib
+import os
+from pathlib import Path
 import warnings
 warnings.filterwarnings('ignore')
 
@@ -96,193 +95,142 @@ def train_lightgbm(X_train, y_train, X_val, y_val):
     return model, val_pred
 
 
-def train_prophet(train_df, val_df):
+def train_xgboost(X_train, y_train, X_val, y_val):
     """
-    Trénuje Prophet model
-    
-    Args:
-        train_df: Training DataFrame s columns ['date', 'total_visitors', 'is_holiday', 'extra']
-        val_df: Validation DataFrame
-        
-    Returns:
-        Tuple[model, predictions]
-    """
-    print("\n" + "=" * 60)
-    print("📈 Training Prophet...")
-    print("=" * 60)
-    
-    # Prophet vyžaduje speciální formát: 'ds' (datum) a 'y' (target)
-    prophet_train = pd.DataFrame({
-        'ds': train_df['date'],
-        'y': train_df['total_visitors']
-    })
-    
-    # Přidání svátků
-    if 'is_holiday' in train_df.columns and 'extra' in train_df.columns:
-        holidays = train_df[train_df['is_holiday'] == 1][['date', 'extra']].copy()
-        holidays.columns = ['ds', 'holiday']
-        holidays = holidays.dropna()
-        holidays = holidays.drop_duplicates()
-    else:
-        holidays = None
-    
-    # Model
-    model = Prophet(
-        yearly_seasonality=True,
-        weekly_seasonality=True,
-        daily_seasonality=False,
-        seasonality_mode='multiplicative',
-        holidays=holidays,
-        changepoint_prior_scale=0.05,
-        seasonality_prior_scale=10,
-        interval_width=0.95
-    )
-    
-    # Přidání custom seasonality
-    model.add_seasonality(
-        name='monthly',
-        period=30.5,
-        fourier_order=5
-    )
-    
-    # Trénování
-    print("  Fitting Prophet model...")
-    model.fit(prophet_train)
-    
-    # Predikce na validaci
-    future = pd.DataFrame({'ds': val_df['date']})
-    forecast = model.predict(future)
-    val_pred = forecast['yhat'].values
-    
-    # Ošetření záporných hodnot
-    val_pred = np.maximum(val_pred, 0)
-    
-    # Metriky
-    print("\n=== Prophet Results ===")
-    print(f"Val MAE: {mean_absolute_error(val_df['total_visitors'], val_pred):.2f}")
-    print(f"Val RMSE: {np.sqrt(mean_squared_error(val_df['total_visitors'], val_pred)):.2f}")
-    print(f"Val R²: {r2_score(val_df['total_visitors'], val_pred):.4f}")
-    
-    return model, val_pred
-
-
-def create_sequences(X, y, seq_length=7):
-    """
-    Vytvoří sekvence pro LSTM
-    
-    Args:
-        X: Feature array
-        y: Target array
-        seq_length: Kolik dnů zpět model vidí
-        
-    Returns:
-        Tuple[X_sequences, y_sequences]
-    """
-    Xs, ys = [], []
-    for i in range(len(X) - seq_length):
-        Xs.append(X[i:(i + seq_length)])
-        ys.append(y[i + seq_length])
-    return np.array(Xs), np.array(ys)
-
-
-def train_neural_network(X_train, y_train, X_val, y_val, seq_length=7):
-    """
-    Trénuje Neural Network (LSTM) model
+    Trénuje XGBoost model
     
     Args:
         X_train: Training features
         y_train: Training target
         X_val: Validation features
         y_val: Validation target
-        seq_length: Délka sekvence pro LSTM
         
     Returns:
-        Tuple[model, predictions, scaler_X, scaler_y]
+        Tuple[model, predictions]
     """
     print("\n" + "=" * 60)
-    print("🧠 Training Neural Network (LSTM)...")
+    print("� Training XGBoost...")
     print("=" * 60)
     
-    # Normalizace dat
-    scaler_X = StandardScaler()
-    scaler_y = StandardScaler()
+    # Parametry
+    params = {
+        'objective': 'reg:squarederror',
+        'eval_metric': 'rmse',
+        'max_depth': 8,
+        'learning_rate': 0.05,
+        'subsample': 0.8,
+        'colsample_bytree': 0.8,
+        'min_child_weight': 3,
+        'gamma': 0.1,
+        'reg_alpha': 0.1,
+        'reg_lambda': 0.1,
+        'random_state': 42,
+        'n_jobs': -1,
+        'verbosity': 0
+    }
     
-    X_train_scaled = scaler_X.fit_transform(X_train)
-    X_val_scaled = scaler_X.transform(X_val)
-    
-    y_train_scaled = scaler_y.fit_transform(y_train.values.reshape(-1, 1)).flatten()
-    y_val_scaled = scaler_y.transform(y_val.values.reshape(-1, 1)).flatten()
-    
-    # Vytvoření sekvencí
-    print(f"  Creating sequences (length={seq_length})...")
-    X_train_seq, y_train_seq = create_sequences(X_train_scaled, y_train_scaled, seq_length)
-    X_val_seq, y_val_seq = create_sequences(X_val_scaled, y_val_scaled, seq_length)
-    
-    print(f"  Train sequences: {X_train_seq.shape}")
-    print(f"  Val sequences: {X_val_seq.shape}")
-    
-    # Model
-    model = keras.Sequential([
-        layers.LSTM(128, return_sequences=True, input_shape=(seq_length, X_train.shape[1])),
-        layers.Dropout(0.3),
-        layers.LSTM(64, return_sequences=False),
-        layers.Dropout(0.3),
-        layers.Dense(32, activation='relu'),
-        layers.Dropout(0.2),
-        layers.Dense(1)
-    ])
-    
-    # Kompilace
-    model.compile(
-        optimizer=keras.optimizers.Adam(learning_rate=0.001),
-        loss='mse',
-        metrics=['mae']
-    )
-    
-    print("\n  Model architecture:")
-    model.summary()
-    
-    # Callbacks
-    early_stop = keras.callbacks.EarlyStopping(
-        monitor='val_loss',
-        patience=20,
-        restore_best_weights=True,
-        verbose=1
-    )
-    
-    reduce_lr = keras.callbacks.ReduceLROnPlateau(
-        monitor='val_loss',
-        factor=0.5,
-        patience=10,
-        min_lr=1e-7,
-        verbose=1
-    )
+    # Dataset pro XGBoost
+    dtrain = xgb.DMatrix(X_train, label=y_train)
+    dval = xgb.DMatrix(X_val, label=y_val)
     
     # Trénování
-    print("\n  Training Neural Network...")
-    history = model.fit(
-        X_train_seq, y_train_seq,
-        validation_data=(X_val_seq, y_val_seq),
-        epochs=200,
-        batch_size=32,
-        callbacks=[early_stop, reduce_lr],
-        verbose=1
+    evals = [(dtrain, 'train'), (dval, 'valid')]
+    model = xgb.train(
+        params,
+        dtrain,
+        num_boost_round=2000,
+        evals=evals,
+        early_stopping_rounds=100,
+        verbose_eval=100
     )
     
     # Predikce
-    val_pred_scaled = model.predict(X_val_seq, verbose=0)
-    val_pred = scaler_y.inverse_transform(val_pred_scaled).flatten()
-    
-    # Upravit délku (kvůli sequences)
-    y_val_adjusted = y_val.values[seq_length:]
+    train_pred = model.predict(dtrain)
+    val_pred = model.predict(dval)
     
     # Metriky
-    print("\n=== Neural Network Results ===")
-    print(f"Val MAE: {mean_absolute_error(y_val_adjusted, val_pred):.2f}")
-    print(f"Val RMSE: {np.sqrt(mean_squared_error(y_val_adjusted, val_pred)):.2f}")
-    print(f"Val R²: {r2_score(y_val_adjusted, val_pred):.4f}")
+    print("\n=== XGBoost Results ===")
+    print(f"Train MAE: {mean_absolute_error(y_train, train_pred):.2f}")
+    print(f"Val MAE: {mean_absolute_error(y_val, val_pred):.2f}")
+    print(f"Val RMSE: {np.sqrt(mean_squared_error(y_val, val_pred)):.2f}")
+    print(f"Val R²: {r2_score(y_val, val_pred):.4f}")
     
-    return model, val_pred, scaler_X, scaler_y
+    # Feature importance
+    print("\n=== Top 10 Important Features ===")
+    importance = model.get_score(importance_type='gain')
+    feature_importance = pd.DataFrame({
+        'feature': list(importance.keys()),
+        'importance': list(importance.values())
+    }).sort_values('importance', ascending=False).head(10)
+    
+    for idx, row in feature_importance.iterrows():
+        print(f"  {row['feature']}: {row['importance']:.0f}")
+    
+    return model, val_pred
+
+
+def train_catboost(X_train, y_train, X_val, y_val):
+    """
+    Trénuje CatBoost model
+    
+    Args:
+        X_train: Training features
+        y_train: Training target
+        X_val: Validation features
+        y_val: Validation target
+        
+    Returns:
+        Tuple[model, predictions]
+    """
+    print("\n" + "=" * 60)
+    print("🐱 Training CatBoost...")
+    print("=" * 60)
+    
+    # Model
+    model = CatBoostRegressor(
+        iterations=2000,
+        learning_rate=0.05,
+        depth=8,
+        l2_leaf_reg=3,
+        random_strength=0.1,
+        bagging_temperature=0.2,
+        od_type='Iter',
+        od_wait=100,
+        random_seed=42,
+        verbose=100,
+        task_type='CPU'
+    )
+    
+    # Trénování
+    model.fit(
+        X_train, y_train,
+        eval_set=(X_val, y_val),
+        use_best_model=True,
+        verbose=100
+    )
+    
+    # Predikce
+    train_pred = model.predict(X_train)
+    val_pred = model.predict(X_val)
+    
+    # Metriky
+    print("\n=== CatBoost Results ===")
+    print(f"Train MAE: {mean_absolute_error(y_train, train_pred):.2f}")
+    print(f"Val MAE: {mean_absolute_error(y_val, val_pred):.2f}")
+    print(f"Val RMSE: {np.sqrt(mean_squared_error(y_val, val_pred)):.2f}")
+    print(f"Val R²: {r2_score(y_val, val_pred):.4f}")
+    
+    # Feature importance
+    print("\n=== Top 10 Important Features ===")
+    feature_importance = pd.DataFrame({
+        'feature': X_train.columns,
+        'importance': model.feature_importances_
+    }).sort_values('importance', ascending=False).head(10)
+    
+    for idx, row in feature_importance.iterrows():
+        print(f"  {row['feature']}: {row['importance']:.4f}")
+    
+    return model, val_pred
 
 
 def optimize_weights(predictions_dict, y_true):
@@ -320,14 +268,14 @@ def optimize_weights(predictions_dict, y_true):
     return result.x
 
 
-def create_ensemble(lgb_pred, prophet_pred, nn_pred, y_true, optimize=True):
+def create_ensemble(lgb_pred, xgb_pred, cat_pred, y_true, optimize=True):
     """
     Vytvoří ensemble z predikcí všech modelů
     
     Args:
         lgb_pred: LightGBM predikce
-        prophet_pred: Prophet predikce
-        nn_pred: Neural Network predikce
+        xgb_pred: XGBoost predikce
+        cat_pred: CatBoost predikce
         y_true: Skutečné hodnoty
         optimize: Zda optimalizovat váhy nebo použít defaultní
         
@@ -339,16 +287,16 @@ def create_ensemble(lgb_pred, prophet_pred, nn_pred, y_true, optimize=True):
     print("=" * 60)
     
     # Ujistit se, že všechny predikce mají stejnou délku
-    min_len = min(len(lgb_pred), len(prophet_pred), len(nn_pred))
+    min_len = min(len(lgb_pred), len(xgb_pred), len(cat_pred))
     lgb_pred = lgb_pred[:min_len]
-    prophet_pred = prophet_pred[:min_len]
-    nn_pred = nn_pred[:min_len]
+    xgb_pred = xgb_pred[:min_len]
+    cat_pred = cat_pred[:min_len]
     y_true = y_true[:min_len]
     
     predictions = {
         'lightgbm': lgb_pred,
-        'prophet': prophet_pred,
-        'neural_net': nn_pred
+        'xgboost': xgb_pred,
+        'catboost': cat_pred
     }
     
     if optimize:
@@ -356,21 +304,22 @@ def create_ensemble(lgb_pred, prophet_pred, nn_pred, y_true, optimize=True):
         weights = optimize_weights(predictions, y_true)
         print(f"\n=== Optimized Weights ===")
         print(f"LightGBM: {weights[0]:.3f}")
-        print(f"Prophet: {weights[1]:.3f}")
-        print(f"Neural Network: {weights[2]:.3f}")
+        print(f"XGBoost: {weights[1]:.3f}")
+        print(f"CatBoost: {weights[2]:.3f}")
     else:
-        # Použij defaultní váhy
-        weights = np.array([0.45, 0.30, 0.25])
-        print(f"\n=== Default Weights ===")
+        # Pokud není optimalizace, použijeme rovnoměrné váhy
+        n_models = len(predictions)
+        weights = np.array([1.0 / n_models] * n_models)
+        print(f"\n=== Equal Weights (No Optimization) ===")
         print(f"LightGBM: {weights[0]:.3f}")
-        print(f"Prophet: {weights[1]:.3f}")
-        print(f"Neural Network: {weights[2]:.3f}")
+        print(f"XGBoost: {weights[1]:.3f}")
+        print(f"CatBoost: {weights[2]:.3f}")
     
     # Finální predikce
     ensemble_pred = (
         weights[0] * lgb_pred +
-        weights[1] * prophet_pred +
-        weights[2] * nn_pred
+        weights[1] * xgb_pred +
+        weights[2] * cat_pred
     )
     
     # Metriky
@@ -382,14 +331,14 @@ def create_ensemble(lgb_pred, prophet_pred, nn_pred, y_true, optimize=True):
     # Porovnání s jednotlivými modely
     print("\n=== Comparison ===")
     print(f"LightGBM MAE: {mean_absolute_error(y_true, lgb_pred):.2f}")
-    print(f"Prophet MAE: {mean_absolute_error(y_true, prophet_pred):.2f}")
-    print(f"Neural Network MAE: {mean_absolute_error(y_true, nn_pred):.2f}")
+    print(f"XGBoost MAE: {mean_absolute_error(y_true, xgb_pred):.2f}")
+    print(f"CatBoost MAE: {mean_absolute_error(y_true, cat_pred):.2f}")
     print(f"Ensemble MAE: {mean_absolute_error(y_true, ensemble_pred):.2f}")
     
     best_single = min(
         mean_absolute_error(y_true, lgb_pred),
-        mean_absolute_error(y_true, prophet_pred),
-        mean_absolute_error(y_true, nn_pred)
+        mean_absolute_error(y_true, xgb_pred),
+        mean_absolute_error(y_true, cat_pred)
     )
     improvement = best_single - mean_absolute_error(y_true, ensemble_pred)
     improvement_pct = (improvement / best_single) * 100
@@ -405,14 +354,24 @@ def main():
     Hlavní pipeline pro ensemble model
     """
     print("\n" + "=" * 70)
-    print("🚀 ENSEMBLE MODEL TRAINING PIPELINE")
+    print("🚀 ENSEMBLE MODEL TRAINING PIPELINE - WITH WEATHER DATA")
     print("=" * 70)
     
-    # 1. Načíst data
+    # 1. Načíst data S POČASÍM
     print("\n📂 Loading data...")
-    df = pd.read_csv('data/raw/techmania_cleaned_master.csv')
-    print(f"   Loaded {len(df)} records")
+    
+    # Cesta k sloučeným datům (návštěvnost + počasí)
+    script_dir = Path(__file__).parent
+    data_path = script_dir.parent / 'data' / 'processed' / 'techmania_with_weather.csv'
+    
+    df = pd.read_csv(data_path)
+    print(f"   Loaded {len(df)} records from: {data_path.name}")
     print(f"   Date range: {df['date'].min()} - {df['date'].max()}")
+    
+    # Ověřit, že máme weather data
+    weather_cols = ['temperature_mean', 'precipitation', 'weather_code']
+    has_weather = all(col in df.columns for col in weather_cols)
+    print(f"   Weather data present: {'✅ YES' if has_weather else '❌ NO'}")
     
     # 2. Feature engineering
     df = create_features(df)
@@ -431,46 +390,34 @@ def main():
     # 4. Trénovat modely
     lgb_model, lgb_pred = train_lightgbm(X_train, y_train, X_val, y_val)
     
-    prophet_model, prophet_pred = train_prophet(train, val)
+    xgb_model, xgb_pred = train_xgboost(X_train, y_train, X_val, y_val)
     
-    nn_model, nn_pred, scaler_X, scaler_y = train_neural_network(
-        X_train, y_train, X_val, y_val, seq_length=7
-    )
+    cat_model, cat_pred = train_catboost(X_train, y_train, X_val, y_val)
     
     # 5. Ensemble
-    # NN má kratší predikce kvůli sequences (seq_length=7)
-    seq_length = 7
-    y_val_adjusted = y_val.values[seq_length:]
-    lgb_pred_adjusted = lgb_pred[seq_length:]
-    prophet_pred_adjusted = prophet_pred[seq_length:]
-    
     ensemble_pred, weights = create_ensemble(
-        lgb_pred_adjusted,
-        prophet_pred_adjusted,
-        nn_pred,
-        y_val_adjusted,
+        lgb_pred,
+        xgb_pred,
+        cat_pred,
+        y_val.values,
         optimize=True
     )
     
     # 6. Uložit modely
     print("\n💾 Saving models...")
-    import os
-    os.makedirs('models', exist_ok=True)
+    models_dir = os.path.join(os.path.dirname(__file__), '..', 'models')
+    os.makedirs(models_dir, exist_ok=True)
     
-    joblib.dump(lgb_model, 'models/lightgbm_model.pkl')
-    joblib.dump(prophet_model, 'models/prophet_model.pkl')
-    nn_model.save('models/neural_network_model.h5')
-    joblib.dump(scaler_X, 'models/scaler_X.pkl')
-    joblib.dump(scaler_y, 'models/scaler_y.pkl')
-    joblib.dump(weights, 'models/ensemble_weights.pkl')
-    joblib.dump(feature_cols, 'models/feature_columns.pkl')
+    joblib.dump(lgb_model, os.path.join(models_dir, 'lightgbm_model.pkl'))
+    joblib.dump(xgb_model, os.path.join(models_dir, 'xgboost_model.pkl'))
+    joblib.dump(cat_model, os.path.join(models_dir, 'catboost_model.pkl'))
+    joblib.dump(weights, os.path.join(models_dir, 'ensemble_weights.pkl'))
+    joblib.dump(feature_cols, os.path.join(models_dir, 'feature_columns.pkl'))
     
     print("\n✅ Models saved successfully!")
     print("   📁 models/lightgbm_model.pkl")
-    print("   📁 models/prophet_model.pkl")
-    print("   📁 models/neural_network_model.h5")
-    print("   📁 models/scaler_X.pkl")
-    print("   📁 models/scaler_y.pkl")
+    print("   📁 models/xgboost_model.pkl")
+    print("   📁 models/catboost_model.pkl")
     print("   📁 models/ensemble_weights.pkl")
     print("   📁 models/feature_columns.pkl")
     
@@ -480,11 +427,9 @@ def main():
     
     return {
         'lgb': lgb_model,
-        'prophet': prophet_model,
-        'nn': nn_model,
+        'xgb': xgb_model,
+        'cat': cat_model,
         'weights': weights,
-        'scaler_X': scaler_X,
-        'scaler_y': scaler_y,
         'feature_cols': feature_cols
     }
 

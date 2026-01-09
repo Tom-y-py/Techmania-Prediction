@@ -40,22 +40,27 @@ def create_features(df: pd.DataFrame) -> pd.DataFrame:
     # === LAG FEATURES (historické hodnoty) ===
     print("  ✓ Lag features (1, 7, 14, 30 dní zpět)")
     for lag in [1, 7, 14, 30]:
+        # Shift vytvoří NaN pro prvních 'lag' řádků
+        # NaN hodnoty zůstanou - budou ošetřeny při splitu dat
         df[f'visitors_lag_{lag}'] = df['total_visitors'].shift(lag)
     
     # === ROLLING STATISTICS ===
     print("  ✓ Rolling statistics (mean, std, min, max)")
     for window in [7, 14, 30]:
+        # min_periods nastavíme na window/2 aby byla statistika validní
+        # NaN hodnoty zůstanou pro řádky bez dostatečné historie
+        min_periods = max(1, window // 2)
         df[f'visitors_rolling_mean_{window}'] = (
-            df['total_visitors'].rolling(window=window, min_periods=1).mean()
+            df['total_visitors'].rolling(window=window, min_periods=min_periods).mean()
         )
         df[f'visitors_rolling_std_{window}'] = (
-            df['total_visitors'].rolling(window=window, min_periods=1).std()
+            df['total_visitors'].rolling(window=window, min_periods=min_periods).std()
         )
         df[f'visitors_rolling_min_{window}'] = (
-            df['total_visitors'].rolling(window=window, min_periods=1).min()
+            df['total_visitors'].rolling(window=window, min_periods=min_periods).min()
         )
         df[f'visitors_rolling_max_{window}'] = (
-            df['total_visitors'].rolling(window=window, min_periods=1).max()
+            df['total_visitors'].rolling(window=window, min_periods=min_periods).max()
         )
     
     # === SEZÓNNÍ FEATURES ===
@@ -100,6 +105,23 @@ def create_features(df: pd.DataFrame) -> pd.DataFrame:
     df['month_sin'] = np.sin(2 * np.pi * df['month'] / 12)
     df['month_cos'] = np.cos(2 * np.pi * df['month'] / 12)
     
+    # === WEATHER FEATURES ===
+    # Pokud data obsahují weather sloupce, použijeme je přímo
+    weather_cols = [
+        'temperature_max', 'temperature_min', 'temperature_mean',
+        'apparent_temp_max', 'apparent_temp_min', 'apparent_temp_mean',
+        'precipitation', 'rain', 'snowfall', 'precipitation_hours',
+        'weather_code', 'wind_speed_max', 'wind_gusts_max', 'wind_direction',
+        'sunshine_duration', 'daylight_duration',
+        'is_rainy', 'is_snowy', 'is_windy', 'is_nice_weather', 'sunshine_ratio'
+    ]
+    
+    weather_present = [col for col in weather_cols if col in df.columns]
+    if weather_present:
+        print(f"  ✓ Weather features ({len(weather_present)} sloupců): {', '.join(weather_present[:5])}...")
+    else:
+        print("  ⚠️ Weather features nejsou v datech - byly přeskočeny")
+    
     print(f"✅ Created {len(df.columns)} features total")
     
     return df
@@ -107,8 +129,8 @@ def create_features(df: pd.DataFrame) -> pd.DataFrame:
 
 def split_data(
     df: pd.DataFrame, 
-    train_end: str = '2023-12-31', 
-    val_end: str = '2024-12-31'
+    train_end: str = '2024-12-31', 
+    val_end: str = '2025-12-31'
 ) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     """
     Chronologický split dat
@@ -122,26 +144,24 @@ def split_data(
         Tuple[train, validation, test] DataFrames
     """
     print(f"\n📊 Splitting data...")
-    print(f"  Train: до {train_end}")
-    print(f"  Validation: {train_end} - {val_end}")
-    print(f"  Test: od {val_end}")
+    
+    numeric_cols = df.select_dtypes(include=['int64', 'int32', 'float64', 'float32', 'bool', 'uint8']).columns
+    df_before = len(df)
+    df = df.dropna(subset=numeric_cols)
+    print(f"  Dropped {df_before - len(df)} rows with NaN in numeric features")
+    print(f"  Remaining data: {len(df)} rows ({df['date'].min()} - {df['date'].max()})")
+    
+    print(f"\n  Train period: до {train_end}")
+    print(f"  Validation period: {train_end} - {val_end}")
+    print(f"  Test period: od {val_end}")
     
     train = df[df['date'] <= train_end].copy()
     val = df[(df['date'] > train_end) & (df['date'] <= val_end)].copy()
     test = df[df['date'] > val_end].copy()
     
-    # Odstranit řádky s NaN (z lag features)
-    train_before = len(train)
-    val_before = len(val)
-    test_before = len(test)
-    
-    train = train.dropna()
-    val = val.dropna()
-    test = test.dropna()
-    
-    print(f"\n  Train: {len(train)} záznamů (dropped {train_before - len(train)} NaN rows)")
-    print(f"  Validation: {len(val)} záznamů (dropped {val_before - len(val)} NaN rows)")
-    print(f"  Test: {len(test)} záznamů (dropped {test_before - len(test)} NaN rows)")
+    print(f"\n  Train: {len(train)} záznamů")
+    print(f"  Validation: {len(val)} záznamů")
+    print(f"  Test: {len(test)} záznamů")
     
     return train, val, test
 
@@ -154,7 +174,7 @@ def get_feature_columns(df: pd.DataFrame) -> list:
         df: DataFrame s všemi sloupci
         
     Returns:
-        List feature column names
+        List feature column names (pouze číselné)
     """
     # Vyloučit target a metadata sloupce
     exclude_cols = [
@@ -165,9 +185,20 @@ def get_feature_columns(df: pd.DataFrame) -> list:
         'extra',  # text metadata
         'opening_hours',  # text metadata
         'day_of_week_str',  # pokud existuje textová verze
+        'nazvy_svatek',  # text názvy svátků
+        'day_of_week',  # textový název dne (pokud existuje)
     ]
     
+    # Vybrat pouze sloupce, které nejsou v exclude_cols
     feature_cols = [col for col in df.columns if col not in exclude_cols]
+    
+    # Navíc vyfiltrovat pouze číselné sloupce (int, float, bool)
+    numeric_features = []
+    for col in feature_cols:
+        if df[col].dtype in ['int64', 'int32', 'float64', 'float32', 'bool', 'uint8']:
+            numeric_features.append(col)
+    
+    feature_cols = numeric_features
     
     print(f"\n📋 Feature columns ({len(feature_cols)}):")
     if len(feature_cols) <= 15:
@@ -181,13 +212,25 @@ def get_feature_columns(df: pd.DataFrame) -> list:
 if __name__ == '__main__':
     # Test feature engineering
     print("=" * 60)
-    print("Testing Feature Engineering")
+    print("Testing Feature Engineering with Weather Data")
     print("=" * 60)
     
-    # Načíst data
-    df = pd.read_csv('data/raw/techmania_cleaned_master.csv')
-    print(f"\n📂 Loaded {len(df)} records")
+    # Načíst data S POČASÍM (již sloučená návštěvnost + počasí)
+    import os
+    from pathlib import Path
+    
+    # Získat správnou cestu (src složka -> parent -> data)
+    script_dir = Path(__file__).parent
+    data_file = script_dir.parent / 'data' / 'processed' / 'techmania_with_weather.csv'
+    
+    df = pd.read_csv(data_file)
+    print(f"\n📂 Loaded {len(df)} records from: {data_file.name}")
     print(f"   Date range: {df['date'].min()} - {df['date'].max()}")
+    
+    # Ukázat, že máme weather data
+    weather_cols = ['temperature_mean', 'precipitation', 'is_rainy', 'is_snowy']
+    present_weather = [col for col in weather_cols if col in df.columns]
+    print(f"   Weather columns present: {present_weather}")
     
     # Vytvořit features
     df = create_features(df)
@@ -201,5 +244,7 @@ if __name__ == '__main__':
     print("\n" + "=" * 60)
     print("✅ Feature Engineering Test Complete!")
     print("=" * 60)
-
+    
+    print("\n📋 Všechny sloupce:")
     print(df.columns.tolist())
+    print(f"   Total features: {len(feature_cols)}")
