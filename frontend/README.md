@@ -1,73 +1,114 @@
-# React + TypeScript + Vite
+# Techmania Dashboard
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+Moderní dashboard pro analýzu a predikci návštěvnosti science centra Techmania.
 
-Currently, two official plugins are available:
+## Technologie
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) (or [oxc](https://oxc.rs) when used in [rolldown-vite](https://vite.dev/guide/rolldown)) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+- **Next.js 14** - React framework s App Router
+- **TypeScript** - Typová bezpečnost
+- **Tailwind CSS** - Utility-first CSS framework
+- **Headless UI** - Komponenty bez stylování
+- **Chart.js** - Vizualizace dat
+- **date-fns** - Práce s datumy
 
-## React Compiler
+## Instalace
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+```bash
+# Instalace závislostí
+npm install
 
-## Expanding the ESLint configuration
-
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
-
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
-
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+# Spuštění vývojového serveru
+npm run dev
 ```
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
+Aplikace běží na [http://localhost:3000](http://localhost:3000)
 
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
+## Konfigurace
 
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+Vytvořte soubor `.env.local` s následující konfigurací:
+
+```env
+NEXT_PUBLIC_API_URL=http://localhost:5000
 ```
+
+## Funkce
+
+### Dashboard
+- Přehled klíčových metrik
+- Vizualizace návštěvnosti
+- Srovnání skutečné vs. predikované návštěvnosti
+
+### Predikce
+- **Jednoduchá predikce** - Pro konkrétní den s parametry
+- **Rozsahová predikce** - Pro více dní najednou
+
+### Parametry predikce
+- Datum
+- Státní svátek / prázdniny
+- Otevírací doba
+
+## API Endpointy
+
+### POST /predict
+Predikce pro jeden den
+
+```json
+{
+  "date": "2026-01-15",
+  "is_holiday": false,
+  "opening_hours": "09:00-17:00"
+}
+```
+
+### POST /predict/range
+Predikce pro rozsah dat
+
+```json
+{
+  "start_date": "2026-01-15",
+  "end_date": "2026-01-20"
+}
+```
+
+### GET /health
+Health check API
+
+## Struktura projektu
+
+```
+frontend/
+├── src/
+│   ├── app/              # Next.js App Router
+│   │   ├── layout.tsx    # Root layout
+│   │   ├── page.tsx      # Hlavní stránka
+│   │   └── globals.css   # Globální styly
+│   ├── components/       # React komponenty
+│   │   ├── Sidebar.tsx
+│   │   ├── StatsCards.tsx
+│   │   ├── VisitorChart.tsx
+│   │   ├── PredictionForm.tsx
+│   │   └── RangePredictionForm.tsx
+│   ├── lib/              # Utility funkce
+│   │   └── api.ts        # API klient
+│   └── types/            # TypeScript typy
+│       └── api.ts
+├── public/               # Statické soubory
+├── package.json
+├── tsconfig.json
+├── tailwind.config.ts
+└── next.config.js
+```
+
+## Deployment
+
+```bash
+# Build produkční verze
+npm run build
+
+# Spuštění produkční verze
+npm start
+```
+
+## Licence
+
+MIT
