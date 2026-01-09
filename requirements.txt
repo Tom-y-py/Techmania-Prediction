@@ -19,6 +19,7 @@ prophet>=1.1.0
 # Advanced ML
 xgboost>=2.0.0
 lightgbm>=4.0.0
+catboost>=1.2.0
 
 # Deep Learning (for Neural Network in ensemble)
 tensorflow>=2.15.0

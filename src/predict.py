@@ -5,7 +5,7 @@ Prediction Module - Použití natrénovaných ensemble modelů
 import pandas as pd
 import numpy as np
 import joblib
-import tensorflow as tf
+import xgboost as xgb
 from datetime import datetime
 import warnings
 warnings.filterwarnings('ignore')
@@ -23,14 +23,15 @@ def load_models():
     print("📦 Loading models...")
     
     try:
+        import os
+        models_dir = os.path.join(os.path.dirname(__file__), '..', 'models')
+        
         models = {
-            'lgb': joblib.load('models/lightgbm_model.pkl'),
-            'prophet': joblib.load('models/prophet_model.pkl'),
-            'nn': tf.keras.models.load_model('models/neural_network_model.h5'),
-            'scaler_X': joblib.load('models/scaler_X.pkl'),
-            'scaler_y': joblib.load('models/scaler_y.pkl'),
-            'weights': joblib.load('models/ensemble_weights.pkl'),
-            'feature_cols': joblib.load('models/feature_columns.pkl')
+            'lgb': joblib.load(os.path.join(models_dir, 'lightgbm_model.pkl')),
+            'xgb': joblib.load(os.path.join(models_dir, 'xgboost_model.pkl')),
+            'cat': joblib.load(os.path.join(models_dir, 'catboost_model.pkl')),
+            'weights': joblib.load(os.path.join(models_dir, 'ensemble_weights.pkl')),
+            'feature_cols': joblib.load(os.path.join(models_dir, 'feature_columns.pkl'))
         }
         print("✅ Models loaded successfully!")
         return models
@@ -40,7 +41,7 @@ def load_models():
         return None
 
 
-def predict_single_date(date, models_dict, historical_df=None, seq_length=7):
+def predict_single_date(date, models_dict, historical_df=None):
     """
     Predikuje návštěvnost pro konkrétní datum
     
@@ -48,14 +49,15 @@ def predict_single_date(date, models_dict, historical_df=None, seq_length=7):
         date: datetime nebo string ve formátu 'YYYY-MM-DD'
         models_dict: Dict s natrénovanými modely
         historical_df: DataFrame s historickými daty (pokud není, načte se)
-        seq_length: Délka sekvence pro LSTM
         
     Returns:
         Dict s predikcemi a detaily
     """
     # Načíst historická data (potřebujeme pro lag features)
     if historical_df is None:
-        df = pd.read_csv('data/raw/techmania_cleaned_master.csv')
+        import os
+        data_path = os.path.join(os.path.dirname(__file__), '..', 'data', 'raw', 'techmania_cleaned_master.csv')
+        df = pd.read_csv(data_path)
         df['date'] = pd.to_datetime(df['date'])
     else:
         df = historical_df.copy()
@@ -85,7 +87,16 @@ def predict_single_date(date, models_dict, historical_df=None, seq_length=7):
     available_features = [col for col in feature_cols if col in df.columns]
     
     pred_row = df[df['date'] == date]
-    X_pred = pred_row[available_features].fillna(0)
+    
+    # Pro chybějící features použijeme mediánové hodnoty z historických dat
+    X_pred = pred_row[available_features].copy()
+    for col in available_features:
+        if X_pred[col].isna().any():
+            # Použij mediánovou hodnotu z posledních 90 dní historických dat
+            historical_median = df[df['date'] < date][col].tail(90).median()
+            if pd.isna(historical_median):
+                historical_median = 0
+            X_pred[col] = X_pred[col].fillna(historical_median)
     
     # === Predikce z každého modelu ===
     
@@ -96,51 +107,28 @@ def predict_single_date(date, models_dict, historical_df=None, seq_length=7):
     except:
         lgb_pred = lgb_model.predict(X_pred)[0]
     
-    # 2. Prophet
-    prophet_model = models_dict['prophet']
-    future = pd.DataFrame({'ds': [date]})
-    prophet_forecast = prophet_model.predict(future)
-    prophet_pred = prophet_forecast['yhat'].values[0]
-    prophet_lower = prophet_forecast['yhat_lower'].values[0]
-    prophet_upper = prophet_forecast['yhat_upper'].values[0]
+    # 2. XGBoost
+    xgb_model = models_dict['xgb']
+    dmatrix = xgb.DMatrix(X_pred)
+    xgb_pred = xgb_model.predict(dmatrix)[0]
     
-    # Ošetření záporných hodnot
-    prophet_pred = max(prophet_pred, 0)
-    prophet_lower = max(prophet_lower, 0)
-    prophet_upper = max(prophet_upper, 0)
-    
-    # 3. Neural Network (složitější - potřebujeme sekvenci)
-    nn_model = models_dict['nn']
-    scaler_X = models_dict['scaler_X']
-    scaler_y = models_dict['scaler_y']
-    
-    # Vytvořit sekvenci posledních N dnů
-    historical_data = df[df['date'] < date].tail(seq_length)
-    
-    if len(historical_data) >= seq_length:
-        X_seq = historical_data[available_features].fillna(0)
-        X_seq_scaled = scaler_X.transform(X_seq)
-        X_pred_seq = X_seq_scaled.reshape(1, seq_length, -1)
-        
-        nn_pred_scaled = nn_model.predict(X_pred_seq, verbose=0)
-        nn_pred = scaler_y.inverse_transform(nn_pred_scaled)[0][0]
-    else:
-        # Nemáme dostatek historických dat
-        nn_pred = (lgb_pred + prophet_pred) / 2  # Fallback na průměr
+    # 3. CatBoost
+    cat_model = models_dict['cat']
+    cat_pred = cat_model.predict(X_pred)[0]
     
     # === Ensemble ===
     weights = models_dict['weights']
     ensemble_pred = (
         weights[0] * lgb_pred +
-        weights[1] * prophet_pred +
-        weights[2] * nn_pred
+        weights[1] * xgb_pred +
+        weights[2] * cat_pred
     )
     
     # Zaokrouhlit na celé číslo
     ensemble_pred = int(round(max(ensemble_pred, 0)))
     
-    # Confidence interval (aproximace z Prophet + variance modelů)
-    model_std = np.std([lgb_pred, prophet_pred, nn_pred])
+    # Confidence interval (aproximace z variance modelů)
+    model_std = np.std([lgb_pred, xgb_pred, cat_pred])
     confidence_lower = int(max(0, ensemble_pred - 1.96 * model_std))
     confidence_upper = int(ensemble_pred + 1.96 * model_std)
     
@@ -151,14 +139,13 @@ def predict_single_date(date, models_dict, historical_df=None, seq_length=7):
         'confidence_interval': (confidence_lower, confidence_upper),
         'individual_predictions': {
             'lightgbm': int(round(lgb_pred)),
-            'prophet': int(round(prophet_pred)),
-            'neural_network': int(round(nn_pred))
+            'xgboost': int(round(xgb_pred)),
+            'catboost': int(round(cat_pred))
         },
-        'prophet_interval': (int(prophet_lower), int(prophet_upper)),
         'model_weights': {
             'lightgbm': float(weights[0]),
-            'prophet': float(weights[1]),
-            'neural_network': float(weights[2])
+            'xgboost': float(weights[1]),
+            'catboost': float(weights[2])
         }
     }
     
@@ -178,7 +165,9 @@ def predict_date_range(start_date, end_date, models_dict):
         DataFrame s predikcemi
     """
     # Načíst historická data jednou
-    df = pd.read_csv('data/raw/techmania_cleaned_master.csv')
+    import os
+    data_path = os.path.join(os.path.dirname(__file__), '..', 'data', 'raw', 'techmania_cleaned_master.csv')
+    df = pd.read_csv(data_path)
     df['date'] = pd.to_datetime(df['date'])
     
     # Vytvořit rozsah dat
@@ -202,8 +191,8 @@ def predict_date_range(start_date, end_date, models_dict):
                 'lower_bound': pred['confidence_interval'][0],
                 'upper_bound': pred['confidence_interval'][1],
                 'lightgbm': pred['individual_predictions']['lightgbm'],
-                'prophet': pred['individual_predictions']['prophet'],
-                'neural_network': pred['individual_predictions']['neural_network']
+                'xgboost': pred['individual_predictions']['xgboost'],
+                'catboost': pred['individual_predictions']['catboost']
             })
         except Exception as e:
             print(f"  ⚠️ Error predicting {date}: {e}")
@@ -230,10 +219,8 @@ def print_prediction(result):
     
     print(f"\n📊 Jednotlivé modely:")
     print(f"   LightGBM (váha {result['model_weights']['lightgbm']:.1%}): {result['individual_predictions']['lightgbm']} návštěvníků")
-    print(f"   Prophet (váha {result['model_weights']['prophet']:.1%}): {result['individual_predictions']['prophet']} návštěvníků")
-    print(f"   Neural Net (váha {result['model_weights']['neural_network']:.1%}): {result['individual_predictions']['neural_network']} návštěvníků")
-    
-    print(f"\n📈 Prophet interval: [{result['prophet_interval'][0]} - {result['prophet_interval'][1]}]")
+    print(f"   XGBoost (váha {result['model_weights']['xgboost']:.1%}): {result['individual_predictions']['xgboost']} návštěvníků")
+    print(f"   CatBoost (váha {result['model_weights']['catboost']:.1%}): {result['individual_predictions']['catboost']} návštěvníků")
     
     print("=" * 60)
 
@@ -252,25 +239,33 @@ def main():
     if models is None:
         return
     
-    # Příklad 1: Predikce pro konkrétní datum
-    print("\n📅 Příklad 1: Predikce pro konkrétní datum")
-    date = '2026-02-14'  # Valentýn
-    result = predict_single_date(date, models)
+    # Příklad 1: Predikce pro následující den
+    print("\n📅 Příklad 1: Predikce pro následující den")
+    
+    from datetime import date as dt_date, timedelta
+    next_day = dt_date.today() + timedelta(days=1)
+    next_day_str = next_day.strftime('%Y-%m-%d')
+    
+    print(f"   Predikuji pro datum: {next_day_str}")
+    result = predict_single_date(next_day_str, models)
     print_prediction(result)
     
-    # Příklad 2: Predikce pro další týden
-    print("\n📅 Příklad 2: Predikce pro příští týden")
-    from datetime import date as dt_date, timedelta
+    # Příklad 2: Predikce pro následujících 7 dní
+    print("\n📅 Příklad 2: Predikce pro následujících 7 dní")
     
-    today = dt_date.today()
-    next_week = today + timedelta(days=7)
+    start_date = dt_date.today() + timedelta(days=1)
+    end_date = start_date + timedelta(days=6)
     
-    predictions = predict_date_range(today, next_week, models)
+    print(f"   Období: {start_date.strftime('%Y-%m-%d')} až {end_date.strftime('%Y-%m-%d')}")
+    
+    predictions = predict_date_range(start_date, end_date, models)
     print("\n" + str(predictions))
     
     # Uložit výsledky
-    predictions.to_csv('predictions_next_week.csv', index=False)
-    print("\n💾 Predictions saved to: predictions_next_week.csv")
+    import os
+    output_file = os.path.join(os.path.dirname(__file__), '..', 'predictions_next_week.csv')
+    predictions.to_csv(output_file, index=False)
+    print(f"\n💾 Predictions saved to: {output_file}")
     
     print("\n" + "=" * 60)
     print("✅ PREDICTION COMPLETE!")
