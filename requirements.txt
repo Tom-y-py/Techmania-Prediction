@@ -20,6 +20,12 @@ prophet>=1.1.0
 xgboost>=2.0.0
 lightgbm>=4.0.0
 
+# Deep Learning (for Neural Network in ensemble)
+tensorflow>=2.15.0
+
+# Optimization
+scipy>=1.11.0
+
 # Web Application
 flask>=3.0.0
 
