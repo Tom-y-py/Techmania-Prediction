@@ -1,4 +1,4 @@
-date,day_of_week,school_visitors,public_visitors,total_visitors,extra,opening_hours,is_weekend,is_holiday,nazvy_svatku
+date,day_of_week,school_visitors,public_visitors,total_visitors,extra,opening_hours,is_weekend,is_holiday,nazvy_svatek
 2016-01-01,pátek,0.0,0.0,0.0,,zavřeno,0,1,Nový rok / Den obnovy samostatného českého státu
 2016-01-02,sobota,0.0,943.0,943.0,,,1,0,0
 2016-01-03,neděle,0.0,559.0,559.0,,,1,0,0
