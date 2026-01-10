@@ -2,7 +2,7 @@
 FastAPI backend pro predikci návštěvnosti Techmanie.
 """
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from typing import List, Optional, Dict, Any
@@ -14,9 +14,18 @@ import sys
 import os
 from pathlib import Path
 from dotenv import load_dotenv
+from sqlalchemy.orm import Session
 
 # Načíst proměnné prostředí
 load_dotenv()
+
+# Import databázových komponent
+try:
+    from database import get_db, init_db, Prediction, HistoricalData, get_next_version
+    DATABASE_ENABLED = True
+except ImportError as e:
+    print(f"⚠️ Database module not available: {e}")
+    DATABASE_ENABLED = False
 
 # Přidat src do path
 sys.path.append(str(Path(__file__).parent.parent / 'src'))
@@ -70,6 +79,8 @@ app.add_middleware(
 models = {}
 feature_columns = None
 ensemble_weights = None
+ensemble_info = None  # Nová: informace o typu ensemble (weighted/stacking/single_lgb)
+meta_model = None  # Nová: meta-model pro stacking
 historical_data = None  # Pro ukládání historických dat
 
 # Pydantic modely pro request/response
@@ -139,11 +150,34 @@ class HistoricalDataResponse(BaseModel):
     end_date: str
     total_days: int
 
+class PredictionVersion(BaseModel):
+    version: int
+    predicted_visitors: int
+    created_at: str
+    model_name: str
+    temperature_mean: Optional[float]
+    precipitation: Optional[float]
+    is_nice_weather: Optional[int]
+    notes: Optional[str]
+
+class PredictionHistoryResponse(BaseModel):
+    date: str
+    versions: List[PredictionVersion]
+    total_versions: int
+
 # Načtení modelů při startu
 @app.on_event("startup")
 async def load_models():
     """Načte všechny natrénované modely a historická data."""
-    global models, feature_columns, ensemble_weights, historical_data
+    global models, feature_columns, ensemble_weights, ensemble_info, meta_model, historical_data
+    
+    # Inicializovat databázi pokud je dostupná
+    if DATABASE_ENABLED:
+        try:
+            init_db()
+            print("✅ Database initialized")
+        except Exception as e:
+            print(f"⚠️ Database initialization failed: {e}")
     
     try:
         # Načtení jednotlivých modelů
@@ -154,14 +188,54 @@ async def load_models():
         # Načtení vah ensemble
         ensemble_weights = joblib.load(MODELS_DIR / 'ensemble_weights.pkl')
         
+        # Načtení informace o typu ensemble (nové modely)
+        ensemble_info_path = MODELS_DIR / 'ensemble_info.pkl'
+        if ensemble_info_path.exists():
+            ensemble_info = joblib.load(ensemble_info_path)
+            print(f"   - Ensemble type: {ensemble_info.get('type', 'weighted').upper()}")
+            print(f"   - Ensemble MAE: {ensemble_info.get('mae', 'N/A')}")
+            
+            # Načíst meta-model pokud je stacking
+            if ensemble_info.get('type') == 'stacking':
+                meta_model_path = MODELS_DIR / 'meta_model.pkl'
+                if meta_model_path.exists():
+                    meta_model = joblib.load(meta_model_path)
+                    print(f"   - Meta-model loaded: ✅")
+                else:
+                    print(f"   ⚠️ Meta-model not found, falling back to weighted")
+                    ensemble_info['type'] = 'weighted'
+        else:
+            # Starší modely bez ensemble_info = weighted
+            ensemble_info = {'type': 'weighted', 'mae': None}
+            print(f"   - Ensemble type: WEIGHTED (legacy)")
+        
         # Načtení seznamu features
         feature_columns = joblib.load(MODELS_DIR / 'feature_columns.pkl')
         
         # Načtení historických dat pro statistiky
         try:
+            # 1. Načíst historická data (do 2025)
             historical_data = pd.read_csv(DATA_DIR / 'techmania_cleaned_master.csv')
             historical_data['date'] = pd.to_datetime(historical_data['date'])
-            print(f"   - Historická data: {len(historical_data)} záznamů")
+            print(f"   - Historická data: {len(historical_data)} záznamů (do {historical_data['date'].max().date()})")
+            
+            # 2. Načíst template pro 2026 (s předvyplněnými holiday features)
+            template_2026_path = DATA_DIR / 'techmania_2026_template.csv'
+            if template_2026_path.exists():
+                df_2026 = pd.read_csv(template_2026_path)
+                df_2026['date'] = pd.to_datetime(df_2026['date'])
+                
+                # Spojit s historickými daty (pokud už tam nejsou data z 2026)
+                max_historical_date = historical_data['date'].max()
+                df_2026_filtered = df_2026[df_2026['date'] > max_historical_date]
+                
+                if len(df_2026_filtered) > 0:
+                    # Filtrovat jen řádky s návštěvností (pro statistiky)
+                    # Pro predikce použijeme i řádky bez návštěvnosti
+                    historical_data = pd.concat([historical_data, df_2026_filtered], ignore_index=True)
+                    print(f"   - 2026 template: {len(df_2026_filtered)} řádků (holiday features předvyplněny)")
+            else:
+                print(f"   ⚠️ 2026 template nenalezen: {template_2026_path}")
         except Exception as e:
             print(f"   ⚠️ Historická data nenačtena: {e}")
             historical_data = None
@@ -178,17 +252,43 @@ async def load_models():
         raise
 
 def make_ensemble_prediction(df: pd.DataFrame) -> np.ndarray:
-    """Provede ensemble predikci."""
-    predictions = {}
+    """
+    Provede ensemble predikci podle typu ensemble.
+    Podporuje: weighted, stacking, single_lgb
+    """
+    import xgboost as xgb
     
     # Predikce z každého modelu
-    for model_name, model in models.items():
-        predictions[model_name] = model.predict(df[feature_columns])
+    lgb_pred = models['lightgbm'].predict(df[feature_columns])
     
-    # Vážený průměr
-    ensemble_pred = np.zeros(len(df))
-    for model_name, weight in ensemble_weights.items():
-        ensemble_pred += weight * predictions[model_name]
+    # XGBoost potřebuje DMatrix
+    dmatrix = xgb.DMatrix(df[feature_columns])
+    xgb_pred = models['xgboost'].predict(dmatrix)
+    
+    cat_pred = models['catboost'].predict(df[feature_columns])
+    
+    # Rozhodnout podle typu ensemble
+    ensemble_type = ensemble_info.get('type', 'weighted') if ensemble_info else 'weighted'
+    
+    if ensemble_type == 'single_lgb':
+        # SINGLE: Použít pouze LightGBM
+        ensemble_pred = lgb_pred
+        print(f"   🎯 Using SINGLE LightGBM model")
+        
+    elif ensemble_type == 'stacking' and meta_model is not None:
+        # STACKING: Použít meta-model
+        meta_features = np.column_stack([lgb_pred, xgb_pred, cat_pred])
+        ensemble_pred = meta_model.predict(meta_features)
+        print(f"   🧠 Using STACKING ensemble with meta-model")
+        
+    else:
+        # WEIGHTED: Vážený průměr (default)
+        ensemble_pred = (
+            ensemble_weights[0] * lgb_pred +
+            ensemble_weights[1] * xgb_pred +
+            ensemble_weights[2] * cat_pred
+        )
+        print(f"   ⚖️ Using WEIGHTED ensemble (weights: {ensemble_weights})")
     
     return ensemble_pred
 
@@ -231,12 +331,28 @@ async def models_info():
     if not models:
         raise HTTPException(status_code=503, detail="Modely nejsou načteny")
     
-    return {
+    ensemble_type = ensemble_info.get('type', 'weighted') if ensemble_info else 'weighted'
+    ensemble_mae = ensemble_info.get('mae') if ensemble_info else None
+    
+    response = {
         "models": list(models.keys()),
-        "ensemble_weights": ensemble_weights,
+        "ensemble_type": ensemble_type.upper(),
+        "ensemble_weights": {
+            "lightgbm": float(ensemble_weights[0]),
+            "xgboost": float(ensemble_weights[1]),
+            "catboost": float(ensemble_weights[2])
+        } if ensemble_weights is not None and len(ensemble_weights) >= 3 else None,
         "features_count": len(feature_columns) if feature_columns else 0,
         "feature_sample": feature_columns[:10] if feature_columns else []
     }
+    
+    if ensemble_mae is not None:
+        response["validation_mae"] = float(ensemble_mae)
+    
+    if ensemble_type == 'stacking':
+        response["meta_model"] = "Ridge Regression" if meta_model is not None else "Not loaded"
+    
+    return response
 
 @app.get("/stats", response_model=StatsResponse, tags=["Statistics"])
 async def get_statistics():
@@ -307,12 +423,13 @@ async def get_historical_data(days: int = 30):
         raise HTTPException(status_code=500, detail=f"Chyba při načítání dat: {str(e)}")
 
 @app.post("/predict", response_model=PredictionResponse, tags=["Predictions"])
-async def predict(request: PredictionRequest):
+async def predict(request: PredictionRequest, db: Session = Depends(get_db) if DATABASE_ENABLED else None):
     """
     Predikce návštěvnosti pro konkrétní datum.
     
     Použije ensemble model (LightGBM + XGBoost + CatBoost) pro predikci.
     Automaticky detekuje svátky a získává informace o počasí.
+    Uloží predikci do databáze s verzováním.
     """
     if not models:
         raise HTTPException(status_code=503, detail="Modely nejsou načteny")
@@ -321,11 +438,27 @@ async def predict(request: PredictionRequest):
         # Parsování data
         pred_date = pd.to_datetime(request.date).date()
         
-        # Auto-detekce svátku (pokud není zadán)
+        # Zkusit najít datum v historických datech (může obsahovat předvyplněné holiday features)
+        existing_row = None
+        if historical_data is not None:
+            existing_row_df = historical_data[historical_data['date'] == pd.to_datetime(pred_date)]
+            if not existing_row_df.empty:
+                existing_row = existing_row_df.iloc[0].to_dict()
+                print(f"   ℹ️ Datum {pred_date} nalezeno v datech (použiji předvyplněné holiday features)")
+        
+        # Auto-detekce svátku (pokud není zadán A není v datech)
         if request.is_holiday is None:
-            holiday_info = holiday_service.get_holiday_info(pred_date)
-            is_holiday = holiday_info['is_holiday']
-            holiday_name = holiday_info['holiday_name']
+            if existing_row and 'is_holiday' in existing_row:
+                # Použít hodnotu z CSV
+                is_holiday = bool(existing_row['is_holiday'])
+                holiday_name = existing_row.get('extra') if pd.notna(existing_row.get('extra')) else None
+                print(f"   ✓ Holiday info z CSV: is_holiday={is_holiday}")
+            else:
+                # Fallback na holiday_service
+                holiday_info = holiday_service.get_holiday_info(pred_date)
+                is_holiday = holiday_info['is_holiday']
+                holiday_name = holiday_info['holiday_name']
+                print(f"   ✓ Holiday info z holiday_service: is_holiday={is_holiday}")
         else:
             is_holiday = request.is_holiday
             holiday_name = None if not is_holiday else "Uživatelem zadaný svátek"
@@ -344,35 +477,96 @@ async def predict(request: PredictionRequest):
             )
         
         # Vytvoření DataFrame pro predikci
-        df_pred = pd.DataFrame({
-            'date': [pd.to_datetime(pred_date)],
-            'total_visitors': [0],  # Potřebné pro create_features (bude ignorováno při predikci)
-            'is_holiday': [is_holiday],
-            'opening_hours': [request.opening_hours],
-            'temperature_max': [weather_data['temperature_max']],
-            'temperature_min': [weather_data['temperature_min']],
-            'temperature_mean': [weather_data['temperature_mean']],
-            'precipitation': [weather_data['precipitation']],
-            'is_rainy': [weather_data.get('is_rainy', weather_data['precipitation'] > 1.0)],
-            'is_snowy': [weather_data.get('is_snowy', False)],
-            'is_nice_weather': [weather_data.get('is_nice_weather', False)],
-        })
+        # Pokud máme existující řádek z CSV, použijeme ho jako základ
+        if existing_row:
+            # Použít existující řádek a přepsat jen weather data a opening_hours
+            df_pred = pd.DataFrame([existing_row])
+            df_pred['date'] = pd.to_datetime(df_pred['date'])
+            
+            # Aktualizovat weather data z API
+            for k, v in weather_data.items():
+                df_pred[k] = v
+            
+            # Aktualizovat opening_hours
+            df_pred['opening_hours'] = request.opening_hours
+            
+            print(f"   ✓ Použity předvyplněné holiday features z CSV")
+        else:
+            # Vytvořit nový řádek (fallback pro data mimo 2026 template)
+            df_pred = pd.DataFrame({
+                'date': [pd.to_datetime(pred_date)],
+                'total_visitors': [np.nan],  # NaN = neznámá hodnota (predikce)
+                'school_visitors': [np.nan],
+                'public_visitors': [np.nan],
+                'extra': [holiday_name],
+                'opening_hours': [request.opening_hours],
+                # Všechna weather data z API (rozbalíme dictionary)
+                **{k: [v] for k, v in weather_data.items()}
+            })
+            print(f"   ⚠️ Datum nenalezeno v CSV, vytvářím nový řádek")
         
-        # Vytvoření features
+        # create_features přidá časové features, školní prázdniny, odvozené features atd.
         df_pred = create_features(df_pred)
         
-        # Odstranit lag a rolling features (budou NaN pro single prediction)
-        # Nahradit NaN hodnotami střední hodnotou nebo 0
-        df_pred = df_pred.fillna(0)
-        
         # Vybrat pouze features, které model očekává
-        df_pred = df_pred[feature_columns]
+        available_features = [col for col in feature_columns if col in df_pred.columns]
+        X_pred = df_pred[available_features].copy()
+        
+        # Doplnit chybějící features (např. některé weather features mohou chybět)
+        missing_features = [col for col in feature_columns if col not in df_pred.columns]
+        if missing_features:
+            print(f"   ⚠️ Warning: Missing features: {missing_features[:10]}{'...' if len(missing_features) > 10 else ''}")
+            # Doplníme nulami nebo mediány
+            for col in missing_features:
+                X_pred[col] = 0
+        
+        # Nahradit NaN hodnotami nulou
+        X_pred = X_pred.fillna(0)
+        
+        # Ujistit se, že máme správné pořadí sloupců
+        X_pred = X_pred[feature_columns]
         
         # Ensemble predikce
-        prediction = make_ensemble_prediction(df_pred)[0]
+        prediction = make_ensemble_prediction(X_pred)[0]
         
         # Zaokrouhlení na celé číslo
         prediction = int(np.round(prediction))
+        
+        # Uložit predikci do databáze s verzováním
+        if DATABASE_ENABLED and db is not None:
+            try:
+                # Získat další verzi
+                version = get_next_version(db, pred_date)
+                
+                # Získat den v týdnu v češtině
+                day_names = ['pondělí', 'úterý', 'středa', 'čtvrtek', 'pátek', 'sobota', 'neděle']
+                day_of_week_cz = day_names[pred_date.weekday()]
+                
+                # Vytvořit nový záznam predikce
+                db_prediction = Prediction(
+                    prediction_date=pred_date,
+                    predicted_visitors=prediction,
+                    temperature_mean=weather_data.get('temperature_mean'),
+                    precipitation=weather_data.get('precipitation'),
+                    wind_speed_max=weather_data.get('wind_speed_max'),
+                    is_rainy=1 if weather_data.get('is_rainy', False) else 0,
+                    is_snowy=1 if weather_data.get('is_snowy', False) else 0,
+                    is_nice_weather=1 if weather_data.get('is_nice_weather', False) else 0,
+                    day_of_week=day_of_week_cz,
+                    is_weekend=1 if pred_date.weekday() >= 5 else 0,
+                    is_holiday=1 if is_holiday else 0,
+                    model_name="ensemble",
+                    confidence_lower=int(prediction * 0.85),
+                    confidence_upper=int(prediction * 1.15),
+                    version=version,
+                    created_by="api"
+                )
+                db.add(db_prediction)
+                db.commit()
+                print(f"✅ Prediction saved to database: {pred_date} (version {version})")
+            except Exception as e:
+                print(f"⚠️ Failed to save prediction to database: {e}")
+                db.rollback()
         
         return {
             "date": pred_date.strftime('%Y-%m-%d'),
@@ -382,9 +576,13 @@ async def predict(request: PredictionRequest):
                 "upper": int(prediction * 1.15)
             },
             "model_info": {
-                "type": "ensemble",
+                "type": ensemble_info.get('type', 'weighted').upper() if ensemble_info else "WEIGHTED",
                 "models": list(models.keys()),
-                "weights": ensemble_weights
+                "weights": {
+                    "lightgbm": float(ensemble_weights[0]),
+                    "xgboost": float(ensemble_weights[1]),
+                    "catboost": float(ensemble_weights[2])
+                } if ensemble_weights is not None and len(ensemble_weights) >= 3 else None
             },
             "holiday_info": {
                 "is_holiday": is_holiday,
@@ -427,7 +625,9 @@ async def predict_range(request: RangePredictionRequest):
             'xgb': models['xgboost'],
             'cat': models['catboost'],
             'weights': ensemble_weights,
-            'feature_cols': feature_columns
+            'feature_cols': feature_columns,
+            'ensemble_type': ensemble_info.get('type', 'weighted') if ensemble_info else 'weighted',
+            'meta_model': meta_model
         }
         
         results_df = predict_date_range(start_date, end_date, models_dict)
@@ -493,6 +693,180 @@ async def predict_range(request: RangePredictionRequest):
         print(f"❌ Error in predict_range: {e}")
         print(traceback.format_exc())
         raise HTTPException(status_code=500, detail=f"Chyba při predikci: {str(e)}")
+
+@app.get("/predictions/history/{date_str}", response_model=PredictionHistoryResponse, tags=["Predictions"])
+async def get_prediction_history(date_str: str, db: Session = Depends(get_db) if DATABASE_ENABLED else None):
+    """
+    Získá všechny verze predikce pro dané datum.
+    
+    Umožňuje vidět, jak se predikce měnila v čase.
+    """
+    if not DATABASE_ENABLED or db is None:
+        raise HTTPException(status_code=503, detail="Database není dostupná")
+    
+    try:
+        pred_date = pd.to_datetime(date_str).date()
+        
+        # Načíst všechny verze predikce pro toto datum
+        predictions = db.query(Prediction)\
+            .filter(Prediction.prediction_date == pred_date)\
+            .order_by(Prediction.version.desc())\
+            .all()
+        
+        if not predictions:
+            raise HTTPException(status_code=404, detail=f"Žádné predikce pro datum {date_str}")
+        
+        versions = []
+        for pred in predictions:
+            versions.append({
+                "version": pred.version,
+                "predicted_visitors": pred.predicted_visitors,
+                "created_at": pred.created_at.isoformat(),
+                "model_name": pred.model_name,
+                "temperature_mean": pred.temperature_mean,
+                "precipitation": pred.precipitation,
+                "is_nice_weather": pred.is_nice_weather,
+                "notes": pred.notes
+            })
+        
+        return {
+            "date": date_str,
+            "versions": versions,
+            "total_versions": len(versions)
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Chyba při načítání historie: {str(e)}")
+
+@app.get("/predictions/latest", tags=["Predictions"])
+async def get_latest_predictions(limit: int = 20, db: Session = Depends(get_db) if DATABASE_ENABLED else None):
+    """
+    Získá nejnovější predikce (poslední verze pro každé datum).
+    """
+    if not DATABASE_ENABLED or db is None:
+        raise HTTPException(status_code=503, detail="Database není dostupná")
+    
+    try:
+        from sqlalchemy import func
+        
+        # Získat nejnovější verzi pro každé datum
+        subquery = db.query(
+            Prediction.prediction_date,
+            func.max(Prediction.version).label('max_version')
+        ).group_by(Prediction.prediction_date).subquery()
+        
+        predictions = db.query(Prediction)\
+            .join(
+                subquery,
+                (Prediction.prediction_date == subquery.c.prediction_date) &
+                (Prediction.version == subquery.c.max_version)
+            )\
+            .order_by(Prediction.created_at.desc())\
+            .limit(limit)\
+            .all()
+        
+        results = []
+        for pred in predictions:
+            results.append({
+                "date": pred.prediction_date.isoformat(),
+                "predicted_visitors": pred.predicted_visitors,
+                "version": pred.version,
+                "created_at": pred.created_at.isoformat(),
+                "model_name": pred.model_name,
+                "temperature_mean": pred.temperature_mean,
+                "precipitation": pred.precipitation,
+                "is_nice_weather": pred.is_nice_weather,
+                "confidence_interval": {
+                    "lower": pred.confidence_lower,
+                    "upper": pred.confidence_upper
+                }
+            })
+        
+        return {
+            "predictions": results,
+            "count": len(results)
+        }
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Chyba při načítání predikcí: {str(e)}")
+
+@app.get("/data/historical", tags=["Data"])
+async def get_historical_from_db(
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    limit: int = 100,
+    db: Session = Depends(get_db) if DATABASE_ENABLED else None
+):
+    """
+    Získá historická data z databáze.
+    
+    Pokud není databáze dostupná, použije se fallback na CSV.
+    """
+    if DATABASE_ENABLED and db is not None:
+        try:
+            query = db.query(HistoricalData)
+            
+            if start_date:
+                start = pd.to_datetime(start_date).date()
+                query = query.filter(HistoricalData.date >= start)
+            
+            if end_date:
+                end = pd.to_datetime(end_date).date()
+                query = query.filter(HistoricalData.date <= end)
+            
+            records = query.order_by(HistoricalData.date.desc()).limit(limit).all()
+            
+            results = []
+            for record in records:
+                results.append({
+                    "date": record.date.isoformat(),
+                    "visitors": record.total_visitors,
+                    "school_visitors": record.school_visitors,
+                    "public_visitors": record.public_visitors,
+                    "day_of_week": record.day_of_week,
+                    "temperature_mean": record.temperature_mean,
+                    "precipitation": record.precipitation,
+                    "is_weekend": record.is_weekend,
+                    "is_holiday": record.is_holiday,
+                    "is_nice_weather": record.is_nice_weather
+                })
+            
+            return {
+                "source": "database",
+                "data": results,
+                "count": len(results)
+            }
+        except Exception as e:
+            print(f"⚠️ Database query failed: {e}")
+            # Fallback na CSV
+    
+    # Fallback pokud databáze není dostupná
+    if historical_data is not None:
+        df = historical_data.copy()
+        
+        if start_date:
+            df = df[df['date'] >= pd.to_datetime(start_date)]
+        if end_date:
+            df = df[df['date'] <= pd.to_datetime(end_date)]
+        
+        df = df.tail(limit)
+        
+        results = []
+        for _, row in df.iterrows():
+            results.append({
+                "date": row['date'].strftime('%Y-%m-%d'),
+                "visitors": int(row['total_visitors'])
+            })
+        
+        return {
+            "source": "csv",
+            "data": results,
+            "count": len(results)
+        }
+    
+    raise HTTPException(status_code=503, detail="Historická data nejsou dostupná")
 
 if __name__ == '__main__':
     import uvicorn

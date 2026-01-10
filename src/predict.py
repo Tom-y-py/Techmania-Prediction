@@ -45,7 +45,25 @@ def load_models():
             'weights': joblib.load(os.path.join(models_dir, 'ensemble_weights.pkl')),
             'feature_cols': joblib.load(os.path.join(models_dir, 'feature_columns.pkl'))
         }
-        print("✅ Models loaded successfully!")
+        
+        # Načíst informaci o typu ensemble (nové modely)
+        ensemble_info_path = os.path.join(models_dir, 'ensemble_info.pkl')
+        if os.path.exists(ensemble_info_path):
+            ensemble_info = joblib.load(ensemble_info_path)
+            models['ensemble_type'] = ensemble_info.get('type', 'weighted')
+            
+            if ensemble_info['type'] == 'stacking':
+                models['meta_model'] = joblib.load(os.path.join(models_dir, 'meta_model.pkl'))
+                print(f"✅ Models loaded successfully! (Ensemble: STACKING)")
+            elif ensemble_info['type'] == 'single_lgb':
+                print(f"✅ Models loaded successfully! (Using: SINGLE LightGBM - ensemble didn't improve)")
+            else:
+                print(f"✅ Models loaded successfully! (Ensemble: WEIGHTED)")
+        else:
+            # Starší modely bez ensemble_info = weighted ensemble
+            models['ensemble_type'] = 'weighted'
+            print(f"✅ Models loaded successfully! (Ensemble: WEIGHTED - legacy)")
+        
         return models
     except FileNotFoundError as e:
         print(f"❌ Error: {e}")
@@ -65,17 +83,46 @@ def predict_single_date(date, models_dict, historical_df=None):
     Returns:
         Dict s predikcemi a detaily
     """
-    # Načíst historická data S POČASÍM (potřebujeme pro lag features)
+    # Načíst historická data S POČASÍM A SVÁTKY (potřebujeme pro správné features)
     if historical_df is None:
         script_dir = Path(__file__).parent
-        data_path = script_dir.parent / 'data' / 'processed' / 'techmania_with_weather.csv'
+        
+        # 1. Načíst historická data (do 2025)
+        data_path = script_dir.parent / 'data' / 'processed' / 'techmania_with_weather_and_holidays.csv'
         
         if not data_path.exists():
-            print("⚠️ techmania_with_weather.csv nenalezen, použiji data bez počasí")
-            data_path = script_dir.parent / 'data' / 'raw' / 'techmania_cleaned_master.csv'
+            print("⚠️ techmania_with_weather_and_holidays.csv nenalezen, zkouším bez holidays")
+            data_path = script_dir.parent / 'data' / 'processed' / 'techmania_with_weather.csv'
+            
+            if not data_path.exists():
+                print("⚠️ techmania_with_weather.csv nenalezen, použiji data bez počasí")
+                data_path = script_dir.parent / 'data' / 'raw' / 'techmania_cleaned_master.csv'
         
-        df = pd.read_csv(data_path)
-        df['date'] = pd.to_datetime(df['date'])
+        try:
+            df = pd.read_csv(data_path)
+            df['date'] = pd.to_datetime(df['date'])
+            print(f"   📂 Loaded historical data: {len(df)} rows (up to {df['date'].max().date()})")
+        except FileNotFoundError as e:
+            print(f"⚠️ Nepodařilo se načíst historická data: {e}")
+            # Vytvoříme prázdný DataFrame s potřebnými sloupci
+            df = pd.DataFrame(columns=['date', 'total_visitors'])
+            df['date'] = pd.to_datetime(df['date'])
+        
+        # 2. Načíst template pro 2026 (s předvyplněnými holiday features)
+        template_2026_path = script_dir.parent / 'data' / 'raw' / 'techmania_2026_template.csv'
+        if template_2026_path.exists():
+            df_2026 = pd.read_csv(template_2026_path)
+            df_2026['date'] = pd.to_datetime(df_2026['date'])
+            
+            # Spojit s historickými daty (pokud už tam nejsou data z 2026)
+            max_historical_date = df['date'].max()
+            df_2026_filtered = df_2026[df_2026['date'] > max_historical_date]
+            
+            if len(df_2026_filtered) > 0:
+                df = pd.concat([df, df_2026_filtered], ignore_index=True)
+                print(f"   📂 Added 2026 template: {len(df_2026_filtered)} rows (holiday features pre-filled)")
+        else:
+            print(f"   ⚠️ 2026 template not found at {template_2026_path}")
     else:
         df = historical_df.copy()
     
@@ -114,6 +161,18 @@ def predict_single_date(date, models_dict, historical_df=None):
                 'is_nice_weather': int(weather_info.get('is_nice_weather', False)),
             }
             
+            # Okamžitě přidat precipitation_probability (odhad na základě srážek)
+            # Toto je feature z trénovacího CSV, který musí být vždy přítomen
+            precip = weather_data.get('precipitation', 0)
+            if precip > 5:
+                weather_data['precipitation_probability'] = 90
+            elif precip > 1:
+                weather_data['precipitation_probability'] = 70
+            elif precip > 0:
+                weather_data['precipitation_probability'] = 50
+            else:
+                weather_data['precipitation_probability'] = 20
+            
             # Features které API nevrací - dopočítáme z historických dat pokud jsou dostupná
             # Pokud historická data nejsou dostupná, nastavíme value na np.nan 
             pred_month = date.month
@@ -149,6 +208,41 @@ def predict_single_date(date, models_dict, historical_df=None):
                 weather_data['sunshine_duration'] = similar['sunshine_duration'].median() if 'sunshine_duration' in similar and len(similar) > 0 else np.nan
                 weather_data['daylight_duration'] = similar['daylight_duration'].median() if 'daylight_duration' in similar and len(similar) > 0 else np.nan
                 weather_data['sunshine_ratio'] = similar['sunshine_ratio'].median() if 'sunshine_ratio' in similar and len(similar) > 0 else np.nan
+                
+                # Precipitation probability - pokud jsou historická data, upřesníme z nich
+                if 'precipitation_probability' in similar.columns and len(similar) > 0:
+                    hist_precip_prob = similar['precipitation_probability'].median()
+                    if pd.notna(hist_precip_prob):
+                        # Průměr mezi odhadem a historií (kompromis)
+                        weather_data['precipitation_probability'] = (
+                            weather_data['precipitation_probability'] + hist_precip_prob
+                        ) / 2
+                
+                # Další odvozené weather features z trénovacího CSV
+                if 'cloud_cover_percent' in similar and len(similar) > 0:
+                    weather_data['cloud_cover_percent'] = similar['cloud_cover_percent'].median()
+                else:
+                    weather_data['cloud_cover_percent'] = np.nan
+                    
+                if 'feels_like_delta' in similar and len(similar) > 0:
+                    weather_data['feels_like_delta'] = similar['feels_like_delta'].median()
+                else:
+                    weather_data['feels_like_delta'] = np.nan
+                    
+                if 'weather_forecast_confidence' in similar and len(similar) > 0:
+                    weather_data['weather_forecast_confidence'] = similar['weather_forecast_confidence'].median()
+                else:
+                    weather_data['weather_forecast_confidence'] = np.nan
+                    
+                if 'temperature_trend_3d' in similar and len(similar) > 0:
+                    weather_data['temperature_trend_3d'] = similar['temperature_trend_3d'].median()
+                else:
+                    weather_data['temperature_trend_3d'] = np.nan
+                    
+                if 'is_weather_improving' in similar and len(similar) > 0:
+                    weather_data['is_weather_improving'] = int(similar['is_weather_improving'].median())
+                else:
+                    weather_data['is_weather_improving'] = 0
             else:
                 # Pokud nejsou historická data, žádné tiché výchozí hodnoty - použijeme NaN
                 weather_data['apparent_temp_max'] = np.nan
@@ -158,6 +252,15 @@ def predict_single_date(date, models_dict, historical_df=None):
                 weather_data['sunshine_duration'] = np.nan
                 weather_data['daylight_duration'] = np.nan
                 weather_data['sunshine_ratio'] = np.nan
+                
+                # precipitation_probability už je nastavena výše (odhad z aktuálních srážek)
+                # Nemusíme ji zde duplikovat
+                    
+                weather_data['cloud_cover_percent'] = np.nan
+                weather_data['feels_like_delta'] = np.nan
+                weather_data['weather_forecast_confidence'] = np.nan
+                weather_data['temperature_trend_3d'] = np.nan
+                weather_data['is_weather_improving'] = 0
 
             # Kontrola, zda API vrátilo validní data (musí existovat nějaká číselná teplota)
             if pd.notna(weather_data.get('temperature_mean')):
@@ -175,6 +278,39 @@ def predict_single_date(date, models_dict, historical_df=None):
     if not weather_data or 'temperature_mean' not in weather_data:
         raise RuntimeError(f"Weather data not available for {pred_date}. Cannot make prediction without real weather data.")
     
+    # Získat holiday/school break data pro predikované datum
+    holiday_data = {}
+    if SERVICES_AVAILABLE:
+        try:
+            pred_date = date.date() if isinstance(date, pd.Timestamp) else date
+            holiday_info = holiday_service.get_holiday_info(pred_date)
+            
+            # Základní holiday features z API
+            holiday_data = {
+                'is_any_school_break': int(holiday_info.get('is_any_school_break', False)),
+                'school_break_type': holiday_info.get('school_break_type', None),
+                'is_spring_break': int(holiday_info.get('is_spring_break', False)),
+                'is_autumn_break': int(holiday_info.get('is_autumn_break', False)),
+                'is_winter_break': int(holiday_info.get('is_winter_break', False)),
+                'is_easter_break': int(holiday_info.get('is_easter_break', False)),
+                'is_halfyear_break': int(holiday_info.get('is_halfyear_break', False)),
+                'is_summer_holiday': int(holiday_info.get('is_summer_holiday', False)),
+                'days_to_next_break': holiday_info.get('days_to_next_break', 0),
+                'days_from_last_break': holiday_info.get('days_from_last_break', 0),
+                'is_week_before_break': int(holiday_info.get('is_week_before_break', False)),
+                'is_week_after_break': int(holiday_info.get('is_week_after_break', False)),
+                'season_exact': holiday_info.get('season_exact', None),
+                'week_position': holiday_info.get('week_position', None),
+                'is_month_end': int(holiday_info.get('is_month_end', False)),
+                'school_week_number': holiday_info.get('school_week_number', 0),
+                'is_bridge_day': int(holiday_info.get('is_bridge_day', False)),
+                'long_weekend_length': holiday_info.get('long_weekend_length', 0),
+            }
+        except Exception as e:
+            print(f"   ⚠️ Holiday API warning: {e}")
+            # Pokud holiday API selže, ponecháme prázdné hodnoty (NaN se doplní později)
+            holiday_data = {}
+    
     new_row = pd.DataFrame({
         'date': [date],
         'total_visitors': [np.nan],
@@ -182,7 +318,8 @@ def predict_single_date(date, models_dict, historical_df=None):
         'public_visitors': [np.nan],
         'extra': [None],
         'opening_hours': [None],
-        **{k: [v] for k, v in weather_data.items()}
+        **{k: [v] for k, v in weather_data.items()},
+        **{k: [v] for k, v in holiday_data.items()}
     })
     
     df = pd.concat([df, new_row], ignore_index=True)
@@ -238,13 +375,25 @@ def predict_single_date(date, models_dict, historical_df=None):
     cat_model = models_dict['cat']
     cat_pred = cat_model.predict(X_pred)[0]
     
-    # === Ensemble ===
-    weights = models_dict['weights']
-    ensemble_pred = (
-        weights[0] * lgb_pred +
-        weights[1] * xgb_pred +
-        weights[2] * cat_pred
-    )
+    # === Ensemble - podle typu ===
+    ensemble_type = models_dict.get('ensemble_type', 'weighted')
+    
+    if ensemble_type == 'single_lgb':
+        # SINGLE: Použít pouze LightGBM (ensemble nepomohl)
+        ensemble_pred = lgb_pred
+    elif ensemble_type == 'stacking':
+        # STACKING: Použít meta-model
+        meta_model = models_dict['meta_model']
+        meta_features = np.array([[lgb_pred, xgb_pred, cat_pred]])
+        ensemble_pred = meta_model.predict(meta_features)[0]
+    else:
+        # WEIGHTED: Použít váhy
+        weights = models_dict['weights']
+        ensemble_pred = (
+            weights[0] * lgb_pred +
+            weights[1] * xgb_pred +
+            weights[2] * cat_pred
+        )
     
     # Zaokrouhlit na celé číslo
     ensemble_pred = int(round(max(ensemble_pred, 0)))
@@ -258,6 +407,7 @@ def predict_single_date(date, models_dict, historical_df=None):
         'date': date,
         'day_of_week': date.strftime('%A'),
         'ensemble_prediction': ensemble_pred,
+        'ensemble_type': ensemble_type,
         'confidence_interval': (confidence_lower, confidence_upper),
         'individual_predictions': {
             'lightgbm': int(round(lgb_pred)),
@@ -265,9 +415,9 @@ def predict_single_date(date, models_dict, historical_df=None):
             'catboost': int(round(cat_pred))
         },
         'model_weights': {
-            'lightgbm': float(weights[0]),
-            'xgboost': float(weights[1]),
-            'catboost': float(weights[2])
+            'lightgbm': float(models_dict['weights'][0]),
+            'xgboost': float(models_dict['weights'][1]),
+            'catboost': float(models_dict['weights'][2])
         },
         'weather': {
             'description': weather_description or 'N/A',
@@ -296,16 +446,39 @@ def predict_date_range(start_date, end_date, models_dict):
     if not SERVICES_AVAILABLE:
         raise RuntimeError("Weather services not available. Cannot make predictions without real weather data.")
     
-    # Načíst historická data S POČASÍM
+    # Načíst historická data S POČASÍM A SVÁTKY
     script_dir = Path(__file__).parent
-    data_path = script_dir.parent / 'data' / 'processed' / 'techmania_with_weather.csv'
+    
+    # 1. Načíst historická data (do 2025)
+    data_path = script_dir.parent / 'data' / 'processed' / 'techmania_with_weather_and_holidays.csv'
     
     if not data_path.exists():
-        print("⚠️ techmania_with_weather.csv nenalezen, použiji data bez počasí")
-        data_path = script_dir.parent / 'data' / 'raw' / 'techmania_cleaned_master.csv'
+        print("⚠️ techmania_with_weather_and_holidays.csv nenalezen, zkouším bez holidays")
+        data_path = script_dir.parent / 'data' / 'processed' / 'techmania_with_weather.csv'
+        
+        if not data_path.exists():
+            print("⚠️ techmania_with_weather.csv nenalezen, použiji data bez počasí")
+            data_path = script_dir.parent / 'data' / 'raw' / 'techmania_cleaned_master.csv'
     
     df_historical = pd.read_csv(data_path)
     df_historical['date'] = pd.to_datetime(df_historical['date'])
+    print(f"   📂 Loaded historical data: {len(df_historical)} rows")
+    
+    # 2. Načíst template pro 2026 (s předvyplněnými holiday features)
+    template_2026_path = script_dir.parent / 'data' / 'raw' / 'techmania_2026_template.csv'
+    if template_2026_path.exists():
+        df_2026 = pd.read_csv(template_2026_path)
+        df_2026['date'] = pd.to_datetime(df_2026['date'])
+        
+        # Spojit s historickými daty (pokud už tam nejsou data z 2026)
+        max_historical_date = df_historical['date'].max()
+        df_2026_filtered = df_2026[df_2026['date'] > max_historical_date]
+        
+        if len(df_2026_filtered) > 0:
+            df_historical = pd.concat([df_historical, df_2026_filtered], ignore_index=True)
+            print(f"   📂 Added 2026 template: {len(df_2026_filtered)} rows (holiday features pre-filled)")
+    else:
+        print(f"   ⚠️ 2026 template not found at {template_2026_path}")
     
     # Vytvořit rozsah dat
     if isinstance(start_date, str):
@@ -349,6 +522,43 @@ def predict_date_range(start_date, end_date, models_dict):
                 'is_nice_weather': int(weather_info.get('is_nice_weather', False)),
             }
             
+            # Přidat precipitation_probability (odhad z aktuálních srážek)
+            precip = weather_data.get('precipitation', 0)
+            if precip > 5:
+                weather_data['precipitation_probability'] = 90
+            elif precip > 1:
+                weather_data['precipitation_probability'] = 70
+            elif precip > 0:
+                weather_data['precipitation_probability'] = 50
+            else:
+                weather_data['precipitation_probability'] = 20
+            
+            # Získat holiday data
+            try:
+                holiday_info = holiday_service.get_holiday_info(pred_date)
+                weather_data.update({
+                    'is_any_school_break': int(holiday_info.get('is_any_school_break', False)),
+                    'school_break_type': holiday_info.get('school_break_type', None),
+                    'is_spring_break': int(holiday_info.get('is_spring_break', False)),
+                    'is_autumn_break': int(holiday_info.get('is_autumn_break', False)),
+                    'is_winter_break': int(holiday_info.get('is_winter_break', False)),
+                    'is_easter_break': int(holiday_info.get('is_easter_break', False)),
+                    'is_halfyear_break': int(holiday_info.get('is_halfyear_break', False)),
+                    'is_summer_holiday': int(holiday_info.get('is_summer_holiday', False)),
+                    'days_to_next_break': holiday_info.get('days_to_next_break', 0),
+                    'days_from_last_break': holiday_info.get('days_from_last_break', 0),
+                    'is_week_before_break': int(holiday_info.get('is_week_before_break', False)),
+                    'is_week_after_break': int(holiday_info.get('is_week_after_break', False)),
+                    'season_exact': holiday_info.get('season_exact', None),
+                    'week_position': holiday_info.get('week_position', None),
+                    'is_month_end': int(holiday_info.get('is_month_end', False)),
+                    'school_week_number': holiday_info.get('school_week_number', 0),
+                    'is_bridge_day': int(holiday_info.get('is_bridge_day', False)),
+                    'long_weekend_length': holiday_info.get('long_weekend_length', 0),
+                })
+            except Exception as e:
+                print(f"  ⚠️ Holiday API warning for {pred_date}: {e}")
+            
             # Features z historických dat
             pred_month = date.month
             pred_day = date.day
@@ -371,13 +581,20 @@ def predict_date_range(start_date, end_date, models_dict):
                 if len(similar) < 5:
                     similar = df_hist
                 
-                weather_data['apparent_temp_max'] = similar['apparent_temp_max'].median() if 'apparent_temp_max' in similar and len(similar) > 0 else np.nan
-                weather_data['apparent_temp_min'] = similar['apparent_temp_min'].median() if 'apparent_temp_min' in similar and len(similar) > 0 else np.nan
-                weather_data['apparent_temp_mean'] = similar['apparent_temp_mean'].median() if 'apparent_temp_mean' in similar and len(similar) > 0 else np.nan
-                weather_data['wind_direction'] = similar['wind_direction'].median() if 'wind_direction' in similar and len(similar) > 0 else np.nan
-                weather_data['sunshine_duration'] = similar['sunshine_duration'].median() if 'sunshine_duration' in similar and len(similar) > 0 else np.nan
-                weather_data['daylight_duration'] = similar['daylight_duration'].median() if 'daylight_duration' in similar and len(similar) > 0 else np.nan
-                weather_data['sunshine_ratio'] = similar['sunshine_ratio'].median() if 'sunshine_ratio' in similar and len(similar) > 0 else np.nan
+                weather_data['apparent_temp_max'] = similar['apparent_temp_max'].median() if 'apparent_temp_max' in similar.columns and len(similar) > 0 else np.nan
+                weather_data['apparent_temp_min'] = similar['apparent_temp_min'].median() if 'apparent_temp_min' in similar.columns and len(similar) > 0 else np.nan
+                weather_data['apparent_temp_mean'] = similar['apparent_temp_mean'].median() if 'apparent_temp_mean' in similar.columns and len(similar) > 0 else np.nan
+                weather_data['wind_direction'] = similar['wind_direction'].median() if 'wind_direction' in similar.columns and len(similar) > 0 else np.nan
+                weather_data['sunshine_duration'] = similar['sunshine_duration'].median() if 'sunshine_duration' in similar.columns and len(similar) > 0 else np.nan
+                weather_data['daylight_duration'] = similar['daylight_duration'].median() if 'daylight_duration' in similar.columns and len(similar) > 0 else np.nan
+                weather_data['sunshine_ratio'] = similar['sunshine_ratio'].median() if 'sunshine_ratio' in similar.columns and len(similar) > 0 else np.nan
+                
+                # Další odvozené features
+                weather_data['cloud_cover_percent'] = similar['cloud_cover_percent'].median() if 'cloud_cover_percent' in similar.columns and len(similar) > 0 else np.nan
+                weather_data['feels_like_delta'] = similar['feels_like_delta'].median() if 'feels_like_delta' in similar.columns and len(similar) > 0 else np.nan
+                weather_data['weather_forecast_confidence'] = similar['weather_forecast_confidence'].median() if 'weather_forecast_confidence' in similar.columns and len(similar) > 0 else np.nan
+                weather_data['temperature_trend_3d'] = similar['temperature_trend_3d'].median() if 'temperature_trend_3d' in similar.columns and len(similar) > 0 else np.nan
+                weather_data['is_weather_improving'] = int(similar['is_weather_improving'].median()) if 'is_weather_improving' in similar.columns and len(similar) > 0 else 0
             else:
                 weather_data['apparent_temp_max'] = np.nan
                 weather_data['apparent_temp_min'] = np.nan
@@ -386,6 +603,11 @@ def predict_date_range(start_date, end_date, models_dict):
                 weather_data['sunshine_duration'] = np.nan
                 weather_data['daylight_duration'] = np.nan
                 weather_data['sunshine_ratio'] = np.nan
+                weather_data['cloud_cover_percent'] = np.nan
+                weather_data['feels_like_delta'] = np.nan
+                weather_data['weather_forecast_confidence'] = np.nan
+                weather_data['temperature_trend_3d'] = np.nan
+                weather_data['is_weather_improving'] = 0
             
             new_rows.append(weather_data)
             
@@ -414,9 +636,13 @@ def predict_date_range(start_date, end_date, models_dict):
     
     # Doplnit chybějící features mediánem z historických dat
     X_pred = df_pred[available_features].copy()
+    
+    # Konvertovat start_date na pandas Timestamp pro správné porovnání
+    start_date_ts = pd.to_datetime(start_date)
+    
     for col in available_features:
         if X_pred[col].isna().any():
-            historical_median = df_combined[df_combined['date'] < start_date][col].median()
+            historical_median = df_combined[df_combined['date'] < start_date_ts][col].median()
             if pd.isna(historical_median):
                 historical_median = df_combined[col].median()
             if not pd.isna(historical_median):
@@ -448,13 +674,25 @@ def predict_date_range(start_date, end_date, models_dict):
     cat_model = models_dict['cat']
     cat_preds = cat_model.predict(X_pred)
     
-    # === Ensemble ===
-    weights = models_dict['weights']
-    ensemble_preds = (
-        weights[0] * lgb_preds +
-        weights[1] * xgb_preds +
-        weights[2] * cat_preds
-    )
+    # === Ensemble - podle typu ===
+    ensemble_type = models_dict.get('ensemble_type', 'weighted')
+    
+    if ensemble_type == 'single_lgb':
+        # SINGLE: Použít pouze LightGBM
+        ensemble_preds = lgb_preds
+    elif ensemble_type == 'stacking':
+        # STACKING: Použít meta-model
+        meta_model = models_dict['meta_model']
+        meta_features = np.column_stack([lgb_preds, xgb_preds, cat_preds])
+        ensemble_preds = meta_model.predict(meta_features)
+    else:
+        # WEIGHTED: Použít váhy
+        weights = models_dict['weights']
+        ensemble_preds = (
+            weights[0] * lgb_preds +
+            weights[1] * xgb_preds +
+            weights[2] * cat_preds
+        )
     
     # Sestavit výsledky
     results = []

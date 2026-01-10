@@ -60,6 +60,9 @@ class WeatherService:
             # Datum s 5-denním zpožděním (hranice mezi archive a forecast)
             archive_cutoff = today - timedelta(days=5)
             
+            # Pro výpočet trendů potřebujeme 3 dny (target_date -2, -1, target_date)
+            start_date_for_trend = target_date - timedelta(days=2)
+            
             # Rozhodnout, zda použít archive nebo forecast API
             if target_date <= archive_cutoff:
                 # Historická data (archive API) - ZDARMA od 1940!
@@ -67,29 +70,38 @@ class WeatherService:
                 params = {
                     'latitude': self.PLZEN_LAT,
                     'longitude': self.PLZEN_LON,
-                    'start_date': target_date.strftime('%Y-%m-%d'),
+                    'start_date': start_date_for_trend.strftime('%Y-%m-%d'),
                     'end_date': target_date.strftime('%Y-%m-%d'),
                     'daily': 'temperature_2m_max,temperature_2m_min,temperature_2m_mean,'
+                            'apparent_temperature_max,apparent_temperature_min,apparent_temperature_mean,'
                             'precipitation_sum,rain_sum,snowfall_sum,precipitation_hours,'
-                            'weathercode,windspeed_10m_max,windgusts_10m_max',
+                            'weathercode,windspeed_10m_max,windgusts_10m_max,winddirection_10m_dominant,'
+                            'sunshine_duration,daylight_duration,'
+                            'uv_index_max,cloudcover_mean',
                     'timezone': 'Europe/Prague'
                 }
             else:
                 # Předpověď (forecast API) - max 16 dní dopředu
                 days_ahead = (target_date - today).days
                 if days_ahead > 16:
-                    print(f"⚠️ Předpověď je dostupná max 16 dní dopředu (požadováno {days_ahead} dní)")
-                    return self._get_default_weather()
+                    self._raise_no_data_error(
+                        target_date,
+                        f"Forecast is only available up to 16 days ahead (requested {days_ahead} days)"
+                    )
                 
                 url = f"{self.FORECAST_API_BASE}/forecast"
                 params = {
                     'latitude': self.PLZEN_LAT,
                     'longitude': self.PLZEN_LON,
                     'daily': 'temperature_2m_max,temperature_2m_min,temperature_2m_mean,'
+                            'apparent_temperature_max,apparent_temperature_min,apparent_temperature_mean,'
                             'precipitation_sum,rain_sum,snowfall_sum,precipitation_hours,'
-                            'weathercode,windspeed_10m_max,windgusts_10m_max',
+                            'weathercode,windspeed_10m_max,windgusts_10m_max,winddirection_10m_dominant,'
+                            'sunshine_duration,daylight_duration,'
+                            'uv_index_max,cloudcover_mean,'
+                            'precipitation_probability_max',
                     'timezone': 'Europe/Prague',
-                    'forecast_days': days_ahead + 1
+                    'forecast_days': days_ahead + 3  # +3 pro trend
                 }
             
             response = requests.get(url, params=params, timeout=10)
@@ -110,11 +122,14 @@ class WeatherService:
             
             idx = dates.index(target_date)
             
-            # Sestavit výsledek
+            # Sestavit výsledek - základní parametry
             weather = {
                 'temperature_max': daily['temperature_2m_max'][idx],
                 'temperature_min': daily['temperature_2m_min'][idx],
                 'temperature_mean': daily['temperature_2m_mean'][idx],
+                'apparent_temp_max': daily.get('apparent_temperature_max', [None]*len(dates))[idx],
+                'apparent_temp_min': daily.get('apparent_temperature_min', [None]*len(dates))[idx],
+                'apparent_temp_mean': daily.get('apparent_temperature_mean', [None]*len(dates))[idx],
                 'precipitation': daily['precipitation_sum'][idx],
                 'rain': daily['rain_sum'][idx],
                 'snowfall': daily['snowfall_sum'][idx],
@@ -122,6 +137,12 @@ class WeatherService:
                 'weather_code': daily['weathercode'][idx],
                 'wind_speed_max': daily['windspeed_10m_max'][idx],
                 'wind_gusts_max': daily['windgusts_10m_max'][idx],
+                'wind_direction': daily.get('winddirection_10m_dominant', [None]*len(dates))[idx],
+                'sunshine_duration': daily.get('sunshine_duration', [None]*len(dates))[idx],
+                'daylight_duration': daily.get('daylight_duration', [None]*len(dates))[idx],
+                'uv_index': daily.get('uv_index_max', [None]*len(dates))[idx],
+                'cloud_cover_percent': daily.get('cloudcover_mean', [None]*len(dates))[idx],
+                'precipitation_probability': daily.get('precipitation_probability_max', [None]*len(dates))[idx],
             }
             
             # Přidat interpretaci
@@ -134,6 +155,69 @@ class WeatherService:
                 weather['precipitation'] < 1.0 and
                 weather['weather_code'] in [0, 1, 2]  # Clear, mainly clear, partly cloudy
             )
+            
+            # Vypočítat odvozené features
+            # feels_like_delta: Rozdíl mezi pocitovou a skutečnou teplotou
+            if weather['apparent_temp_mean'] is not None and weather['temperature_mean'] is not None:
+                weather['feels_like_delta'] = weather['apparent_temp_mean'] - weather['temperature_mean']
+            else:
+                weather['feels_like_delta'] = 0.0
+            
+            # sunshine_ratio: Poměr slunečního svitu k délce dne
+            if weather['sunshine_duration'] is not None and weather['daylight_duration'] is not None and weather['daylight_duration'] > 0:
+                weather['sunshine_ratio'] = weather['sunshine_duration'] / weather['daylight_duration']
+            else:
+                weather['sunshine_ratio'] = 0.0
+            
+            # weather_forecast_confidence: Spolehlivost předpovědi (0-1)
+            # Čím vzdálenější datum, tím nižší spolehlivost
+            # Pro historická data je to 1.0, pro předpověď klesá s časem
+            today = date.today()
+            if target_date <= today - timedelta(days=5):
+                weather['weather_forecast_confidence'] = 1.0  # Historická data
+            else:
+                days_ahead = (target_date - today).days
+                # Lineární pokles od 1.0 (dnes) do 0.5 (14 dní dopředu)
+                weather['weather_forecast_confidence'] = max(0.5, 1.0 - (days_ahead * 0.035))
+            
+            # temperature_trend_3d: Trend teploty za 3 dny (target_date -2, -1, target_date)
+            # Pozitivní = oteplování, negativní = ochlazování
+            if len(dates) >= 3:
+                # Najít indexy posledních 3 dnů
+                target_idx = dates.index(target_date)
+                if target_idx >= 2:
+                    temp_day_minus_2 = daily['temperature_2m_mean'][target_idx - 2]
+                    temp_day_minus_1 = daily['temperature_2m_mean'][target_idx - 1]
+                    temp_today = daily['temperature_2m_mean'][target_idx]
+                    
+                    # Průměrný denní růst/pokles teploty
+                    weather['temperature_trend_3d'] = (temp_today - temp_day_minus_2) / 2.0
+                    
+                    # is_weather_improving: Počasí se zlepšuje
+                    # Kritéria: teplota roste NEBO srážky klesají NEBO oblačnost klesá
+                    temp_improving = temp_today > temp_day_minus_1
+                    
+                    precip_day_minus_1 = daily['precipitation_sum'][target_idx - 1]
+                    precip_today = daily['precipitation_sum'][target_idx]
+                    rain_improving = precip_today < precip_day_minus_1
+                    
+                    # Pokud máme data o oblačnosti
+                    if 'cloudcover_mean' in daily:
+                        cloud_day_minus_1 = daily['cloudcover_mean'][target_idx - 1]
+                        cloud_today = daily['cloudcover_mean'][target_idx]
+                        cloud_improving = cloud_today < cloud_day_minus_1 if cloud_today is not None else False
+                    else:
+                        cloud_improving = False
+                    
+                    # Počasí se zlepšuje, pokud alespoň 2 ze 3 kritérií platí
+                    improvements = sum([temp_improving, rain_improving, cloud_improving])
+                    weather['is_weather_improving'] = 1 if improvements >= 2 else 0
+                else:
+                    weather['temperature_trend_3d'] = 0.0
+                    weather['is_weather_improving'] = 0
+            else:
+                weather['temperature_trend_3d'] = 0.0
+                weather['is_weather_improving'] = 0
             
             return weather
             

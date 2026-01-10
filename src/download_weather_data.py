@@ -43,7 +43,8 @@ def download_weather_data(start_date: str, end_date: str, output_file: str):
                 'apparent_temperature_max,apparent_temperature_min,apparent_temperature_mean,'
                 'precipitation_sum,rain_sum,snowfall_sum,precipitation_hours,'
                 'weathercode,windspeed_10m_max,windgusts_10m_max,'
-                'winddirection_10m_dominant,sunshine_duration,daylight_duration',
+                'winddirection_10m_dominant,sunshine_duration,daylight_duration,'
+                'cloudcover_mean',  # uv_index_max není dostupný v archive API
         'timezone': 'Europe/Prague'
     }
     
@@ -76,6 +77,7 @@ def download_weather_data(start_date: str, end_date: str, output_file: str):
             'wind_direction': daily['winddirection_10m_dominant'],
             'sunshine_duration': daily['sunshine_duration'],
             'daylight_duration': daily['daylight_duration'],
+            'cloud_cover_percent': daily.get('cloudcover_mean', [None]*len(daily['time'])),  
         })
         
         # Přidat odvozené features
@@ -90,6 +92,18 @@ def download_weather_data(start_date: str, end_date: str, output_file: str):
         
         # Sunshine ratio (procento možného slunečního svitu)
         df['sunshine_ratio'] = df['sunshine_duration'] / df['daylight_duration']
+        
+        # Feels like delta (rozdíl mezi pocitovou a skutečnou teplotou)
+        df['feels_like_delta'] = df['apparent_temp_mean'] - df['temperature_mean']
+        
+        # Weather forecast confidence (pro historická data = 1.0)
+        df['weather_forecast_confidence'] = 1.0
+        
+        # Temperature trend 3d (bude vypočten později při slučování)
+        df['temperature_trend_3d'] = 0.0
+        
+        # Is weather improving (bude vypočten později)
+        df['is_weather_improving'] = 0
         
         print(f"📊 Zpracováno {len(df)} záznamů")
         print(f"   Rozsah dat: {df['date'].min()} až {df['date'].max()}")
