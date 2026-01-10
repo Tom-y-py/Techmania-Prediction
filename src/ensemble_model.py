@@ -36,20 +36,20 @@ def train_lightgbm(X_train, y_train, X_val, y_val):
     print("🌳 Training LightGBM...")
     print("=" * 60)
     
-    # Parametry
+    # Parametry - zvýšená regularizace pro lepší generalizaci
     params = {
         'objective': 'regression',
         'metric': 'rmse',
         'boosting_type': 'gbdt',
-        'num_leaves': 31,
-        'learning_rate': 0.05,
-        'feature_fraction': 0.8,
-        'bagging_fraction': 0.8,
+        'num_leaves': 20,  # Sníženo z 31 - menší stromy = lepší generalizace
+        'learning_rate': 0.03,  # Sníženo z 0.05 - pomalejší učení = lepší počasí
+        'feature_fraction': 0.7,  # Sníženo z 0.8 - více randomizace
+        'bagging_fraction': 0.7,  # Sníženo z 0.8
         'bagging_freq': 5,
-        'max_depth': 8,
-        'min_child_samples': 20,
-        'reg_alpha': 0.1,
-        'reg_lambda': 0.1,
+        'max_depth': 6,  # Sníženo z 8 - menší hloubka = méně přetrénování
+        'min_child_samples': 30,  # Zvýšeno z 20 - robustnější listy
+        'reg_alpha': 0.5,  # Zvýšeno z 0.1 - silnější L1 regularizace
+        'reg_lambda': 0.5,  # Zvýšeno z 0.1 - silnější L2 regularizace
         'verbose': -1,
         'random_state': 42
     }
@@ -112,18 +112,18 @@ def train_xgboost(X_train, y_train, X_val, y_val):
     print("� Training XGBoost...")
     print("=" * 60)
     
-    # Parametry
+    # Parametry - zvýšená regularizace
     params = {
         'objective': 'reg:squarederror',
         'eval_metric': 'rmse',
-        'max_depth': 8,
-        'learning_rate': 0.05,
-        'subsample': 0.8,
-        'colsample_bytree': 0.8,
-        'min_child_weight': 3,
-        'gamma': 0.1,
-        'reg_alpha': 0.1,
-        'reg_lambda': 0.1,
+        'max_depth': 6,  # Sníženo z 8
+        'learning_rate': 0.03,  # Sníženo z 0.05
+        'subsample': 0.7,  # Sníženo z 0.8
+        'colsample_bytree': 0.7,  # Sníženo z 0.8
+        'min_child_weight': 5,  # Zvýšeno z 3
+        'gamma': 0.3,  # Zvýšeno z 0.1
+        'reg_alpha': 0.5,  # Zvýšeno z 0.1
+        'reg_lambda': 0.5,  # Zvýšeno z 0.1
         'random_state': 42,
         'n_jobs': -1,
         'verbosity': 0
@@ -186,14 +186,14 @@ def train_catboost(X_train, y_train, X_val, y_val):
     print("🐱 Training CatBoost...")
     print("=" * 60)
     
-    # Model
+    # Model - zvýšená regularizace
     model = CatBoostRegressor(
         iterations=2000,
-        learning_rate=0.05,
-        depth=8,
-        l2_leaf_reg=3,
-        random_strength=0.1,
-        bagging_temperature=0.2,
+        learning_rate=0.03,  # Sníženo z 0.05
+        depth=6,  # Sníženo z 8
+        l2_leaf_reg=5,  # Zvýšeno z 3
+        random_strength=0.3,  # Zvýšeno z 0.1
+        bagging_temperature=0.5,  # Zvýšeno z 0.2
         od_type='Iter',
         od_wait=100,
         random_seed=42,

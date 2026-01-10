@@ -7,60 +7,82 @@ import {
   ChartBarSquareIcon,
   ArrowTrendingUpIcon 
 } from '@heroicons/react/24/outline';
-
-interface StatsData {
-  totalVisitors: number;
-  avgDailyVisitors: number;
-  peakDay: string;
-  trend: number;
-}
+import { api } from '@/lib/api';
+import type { StatsResponse } from '@/types/api';
 
 export default function StatsCards() {
-  const [stats, setStats] = useState<StatsData>({
-    totalVisitors: 0,
-    avgDailyVisitors: 0,
-    peakDay: '-',
-    trend: 0,
-  });
+  const [stats, setStats] = useState<StatsResponse | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    // Mock data - v reálné aplikaci by se načetla z API
-    setStats({
-      totalVisitors: 125430,
-      avgDailyVisitors: 3421,
-      peakDay: '15. prosince 2025',
-      trend: 12.5,
-    });
+    const fetchStats = async () => {
+      try {
+        const data = await api.getStats();
+        setStats(data);
+      } catch (err: any) {
+        console.error('Failed to fetch stats:', err);
+        setError(err.response?.data?.detail || 'Nepodařilo se načíst statistiky');
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchStats();
   }, []);
+
+  if (loading) {
+    return (
+      <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-4">
+        {[...Array(4)].map((_, i) => (
+          <div key={i} className="overflow-hidden rounded-lg bg-white shadow animate-pulse">
+            <div className="p-6">
+              <div className="h-20 bg-gray-200 rounded"></div>
+            </div>
+          </div>
+        ))}
+      </div>
+    );
+  }
+
+  if (error || !stats) {
+    return (
+      <div className="rounded-lg bg-red-50 p-4">
+        <p className="text-sm text-red-800">
+          {error || 'Statistiky nejsou dostupné'}
+        </p>
+      </div>
+    );
+  }
 
   const cards = [
     {
       name: 'Celkový počet návštěvníků',
-      value: stats.totalVisitors.toLocaleString('cs-CZ'),
+      value: stats.total_visitors.toLocaleString('cs-CZ'),
       icon: UsersIcon,
-      change: `+${stats.trend}%`,
-      changeType: 'positive',
+      change: `Období: ${new Date(stats.data_start_date).toLocaleDateString('cs-CZ')} - ${new Date(stats.data_end_date).toLocaleDateString('cs-CZ')}`,
+      changeType: 'neutral' as const,
     },
     {
       name: 'Průměr návštěvníků/den',
-      value: stats.avgDailyVisitors.toLocaleString('cs-CZ'),
+      value: Math.round(stats.avg_daily_visitors).toLocaleString('cs-CZ'),
       icon: ChartBarSquareIcon,
-      change: '+4.2%',
-      changeType: 'positive',
+      change: `${stats.trend > 0 ? '+' : ''}${stats.trend}% trend`,
+      changeType: stats.trend > 0 ? 'positive' as const : stats.trend < 0 ? 'negative' as const : 'neutral' as const,
     },
     {
       name: 'Den s nejvyšší návštěvností',
-      value: stats.peakDay,
+      value: stats.peak_day,
       icon: CalendarDaysIcon,
-      change: '8,542 návštěvníků',
-      changeType: 'neutral',
+      change: `${stats.peak_visitors.toLocaleString('cs-CZ')} návštěvníků`,
+      changeType: 'neutral' as const,
     },
     {
       name: 'Měsíční trend',
-      value: `+${stats.trend}%`,
+      value: `${stats.trend > 0 ? '+' : ''}${stats.trend}%`,
       icon: ArrowTrendingUpIcon,
-      change: 'Rostoucí tendence',
-      changeType: 'positive',
+      change: stats.trend > 0 ? 'Rostoucí tendence' : stats.trend < 0 ? 'Klesající tendence' : 'Stabilní',
+      changeType: stats.trend > 0 ? 'positive' as const : stats.trend < 0 ? 'negative' as const : 'neutral' as const,
     },
   ];
 

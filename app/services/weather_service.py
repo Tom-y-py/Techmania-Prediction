@@ -99,14 +99,14 @@ class WeatherService:
             
             # Najít správný den v odpovědi
             if 'daily' not in data:
-                return self._get_default_weather()
+                self._raise_no_data_error(target_date, "API response missing 'daily' data")
             
             daily = data['daily']
             
             # Pro archive i forecast - najdeme index našeho data
             dates = [datetime.strptime(d, '%Y-%m-%d').date() for d in daily['time']]
             if target_date not in dates:
-                return self._get_default_weather()
+                self._raise_no_data_error(target_date, f"Date not found in API response (available: {dates[0]} to {dates[-1]})")
             
             idx = dates.index(target_date)
             
@@ -138,11 +138,13 @@ class WeatherService:
             return weather
             
         except requests.RequestException as e:
-            print(f"⚠️ Chyba při získávání počasí z API: {e}")
-            return self._get_default_weather()
+            error_msg = f"API request failed: {str(e)}"
+            print(f"❌ {error_msg}")
+            self._raise_no_data_error(target_date, error_msg)
         except Exception as e:
-            print(f"⚠️ Neočekávaná chyba: {e}")
-            return self._get_default_weather()
+            error_msg = f"Unexpected error: {str(e)}"
+            print(f"❌ {error_msg}")
+            self._raise_no_data_error(target_date, error_msg)
     
     def _interpret_weather_code(self, code: int) -> str:
         """
@@ -182,31 +184,21 @@ class WeatherService:
         }
         return weather_codes.get(code, "Neznámé")
     
-    def _get_default_weather(self) -> Dict:
+    def _raise_no_data_error(self, target_date: date, reason: str) -> None:
         """
-        Vrací průměrné hodnoty počasí jako fallback.
+        Vyhodí chybu, pokud nejsou dostupná žádná data o počasí.
         
-        Returns:
-            Slovník s průměrnými hodnotami
+        Args:
+            target_date: Datum, pro které data chybí
+            reason: Důvod, proč data nejsou k dispozici
+            
+        Raises:
+            ValueError: Vždy - data nejsou k dispozici
         """
-        return {
-            'temperature_max': 15.0,
-            'temperature_min': 5.0,
-            'temperature_mean': 10.0,
-            'precipitation': 2.0,
-            'rain': 2.0,
-            'snowfall': 0.0,
-            'precipitation_hours': 4.0,
-            'weather_code': 2,  # Polojasno
-            'wind_speed_max': 15.0,
-            'wind_gusts_max': 25.0,
-            'weather_description': "Průměrné počasí (odhad)",
-            'is_rainy': False,
-            'is_snowy': False,
-            'is_windy': False,
-            'is_nice_weather': False,
-            'is_default': True
-        }
+        raise ValueError(
+            f"Weather data not available for {target_date.strftime('%Y-%m-%d')}. "
+            f"Reason: {reason}. Cannot make prediction without real weather data."
+        )
     
     def get_weather(self, target_date: date) -> Dict:
         """
@@ -225,7 +217,11 @@ class WeatherService:
             if not row.empty:
                 return row.iloc[0].to_dict()
         
-        # Jinak použít API
+        # Pokud nejsou historická data, zkusit API
+        if self.historical_data is None:
+            print(f"⚠️ Historical data not loaded, trying API for {target_date}")
+        
+        # API
         return self.get_weather_from_api(target_date)
     
     def get_weather_for_range(self, start_date: date, end_date: date) -> pd.DataFrame:
@@ -250,8 +246,10 @@ class WeatherService:
         return pd.DataFrame(weather_data)
 
 
-# Globální instance
-weather_service = WeatherService()
+# Globální instance s inicializací cesty k historickým datům
+from pathlib import Path as PathlibPath
+_weather_data_path = PathlibPath(__file__).parent.parent.parent / 'data' / 'external' / 'weather_data.csv'
+weather_service = WeatherService(historical_data_path=str(_weather_data_path))
 
 
 if __name__ == '__main__':
