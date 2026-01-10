@@ -374,3 +374,84 @@ AVERAGE/day                 471
 ==============================================================================================================
 ✅ TESTING COMPLETE!
 ==============================================================================================================
+
+
+# Dostupné historicky i do budoucna DONE
+- is_school_break         # Jarní/podzimní prázdniny (1 týden)
+- days_to_holiday_start   # Kolik dní do začátku prázdnin
+- days_from_holiday_end   # Kolik dní od konce prázdnin
+- is_last_week_before_holiday  # Poslední týden před prázdninami
+- school_week_number      # Týden školního roku (1-40)
+
+# Lze vypočítat z data
+- is_bridge_day           # "Most" mezi svátkem a víkendem
+- long_weekend_length     # Délka prodlouženého víkendu (3-4 dny)
+- week_position           # Pozice v měsíci (1=první týden, 4=poslední)
+- is_month_end            # Konec měsíce (28-31)
+- season_exact            # Přesné roční období (1=zima, 2=jaro, 3=léto, 4=podzim)
+
+
+# Z weather API (open-meteo)
+- weather_forecast_confidence  # Spolehlivost předpovědi (0-1)
+- temperature_trend_3d         # Trend teploty za 3 dny
+- is_weather_improving         # Počasí se zlepšuje
+- uv_index                     # UV index (relevantní pro venkovní aktivity)
+- cloud_cover_percent          # Oblačnost v %
+- feels_like_delta             # Rozdíl pocitové vs skutečné teploty
+
+===========
+
+
+# Vyžaduje research, ale dostupné pro budoucnost
+- major_event_plzen       # Velká akce v Plzni (Pilsner Fest, Majáles, atd.)
+- is_big_exhibition       # Speciální výstava v Techmanii
+- nearby_attractions_open # Konkurenční atrakce otevřené (DinoParku, Zoo)
+- city_event_score        # Skóre událostí ve městě (1-10)
+
+# Dostupné historicky i prediktovatelné
+- fuel_price_czk          # Cena benzínu (ovlivňuje cestování)
+- is_payday_week          # Týden výplat (koreluje s výdaji na volný čas)
+- is_month_start          # Začátek měsíce (více peněz)
+- consumer_confidence     # Index spotřebitelské důvěry (měsíční)
+
+# Z Google Analytics / Facebook Insights
+- website_visitors_7d      # Návštěvníci webu za 7 dní
+- facebook_engagement      # Engagement na sociálních sítích
+- ad_campaign_active       # Běží marketingová kampaň (0/1)
+- google_search_volume     # Volume vyhledávání "techmania" (Google Trends)
+- instagram_reach          # Dosah na Instagramu
+
+# Z veřejných zdrojů
+- road_works_major         # Velké uzavírky silnic v Plzni (0/1)
+- public_transport_issues  # Problémy MHD/vlaky (0/1)
+- parking_price            # Cena parkování (Kč/h)
+- is_train_discount_valid  # Platí slevy na vlak (0/1)
+
+# Z ČSÚ (měsíční data)
+- school_age_population    # Počet dětí školního věku v kraji
+- tourism_index_plzen      # Index turistického ruchu v Plzni
+- unemployment_rate        # Míra nezaměstnanosti (%)
+
+
+Missing:
+"apparent_temp_max, apparent_temp_min, apparent_temp_mean  # Pokud nejsou v API
+wind_direction                                            # Pokud není v API  
+sunshine_duration, daylight_duration, sunshine_ratio     # Pokud nejsou v API
+cloud_cover_percent                                       # Pokud není v API
+feels_like_delta                                          # Odvozený feature
+weather_forecast_confidence                               # Odvozený feature
+temperature_trend_3d                                      # Potřebuje 3 dny historie
+is_weather_improving                                      # Potřebuje 3 dny historie
+20. precipitation_probability   → Weather API MÁ jen pro forecast, CHYBÍ pro archive
+24. apparent_temp_max           → Možná chybí v API → doplní se z historie nebo NaN→0
+25. apparent_temp_min           → Možná chybí v API → doplní se z historie nebo NaN→0
+26. apparent_temp_mean          → Možná chybí v API → doplní se z historie nebo NaN→0
+34. wind_direction              → Možná chybí v API → doplní se z historie nebo NaN→0
+35. sunshine_duration           → Možná chybí v API → doplní se z historie nebo NaN→0
+36. daylight_duration           → Možná chybí v API → doplní se z historie nebo NaN→0
+37. cloud_cover_percent         → Možná chybí v API → doplní se z historie nebo NaN→0
+42. sunshine_ratio              → Odvozený (sunshine/daylight) - pokud chybí data → NaN→0
+43. feels_like_delta            → Odvozený (apparent - real temp) - pokud chybí data → 0
+44. weather_forecast_confidence → Odvozený (1.0 pro historii, klesá pro forecast) - počítá weather_service
+45. temperature_trend_3d        → Odvozený (potřebuje 3 dny dat) - pokud chybí → 0
+46. is_weather_improving        → Odvozený (potřebuje 3 dny dat) - pokud chybí → 0" 
