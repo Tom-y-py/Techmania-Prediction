@@ -21,8 +21,11 @@ load_dotenv()
 
 # Import databázových komponent
 try:
-    from database import get_db, init_db, Prediction, HistoricalData, get_next_version
-
+    from database import (
+        get_db, init_db, Prediction, HistoricalData, TemplateData,
+        get_next_version, validate_future_date, mark_template_complete,
+        get_complete_template_records, get_latest_prediction
+    )
     DATABASE_ENABLED = True
 except ImportError as e:
     print(f"⚠️ Database module not available: {e}")
@@ -183,6 +186,36 @@ class PredictionHistoryResponse(BaseModel):
     versions: List[PredictionVersion]
     total_versions: int
 
+# Nové modely pro PATCH endpoint
+class TemplateDataUpdate(BaseModel):
+    """Data pro aktualizaci template záznamu s reálnými hodnotami"""
+    date: str = Field(..., description="Datum ve formátu YYYY-MM-DD", example="2026-01-15")
+    total_visitors: Optional[int] = Field(None, description="Celkový počet návštěvníků")
+    school_visitors: Optional[int] = Field(None, description="Počet školních návštěvníků")
+    public_visitors: Optional[int] = Field(None, description="Počet veřejných návštěvníků")
+    extra: Optional[str] = Field(None, description="Extra poznámky")
+    opening_hours: Optional[str] = Field(None, description="Otevírací doba")
+
+class TemplateDataPatchResponse(BaseModel):
+    """Odpověď z PATCH endpointu"""
+    success: bool
+    message: str
+    date: str
+    was_complete: bool
+    is_complete: bool
+    updated_fields: List[str]
+
+class TemplateDataBatchUpdate(BaseModel):
+    """Batch aktualizace více template záznamů najednou"""
+    updates: List[TemplateDataUpdate] = Field(..., description="Seznam aktualizací")
+
+class TemplateDataBatchResponse(BaseModel):
+    """Odpověď z batch update"""
+    success: bool
+    total_processed: int
+    successful_updates: int
+    failed_updates: int
+    details: List[TemplateDataPatchResponse]
 
 # Načtení modelů při startu
 @app.on_event("startup")
@@ -405,6 +438,12 @@ async def get_statistics():
         raise HTTPException(status_code=503, detail="Historická data nejsou dostupná")
 
     try:
+        # Odfiltrovat NaN hodnoty
+        clean_data = historical_data.dropna(subset=['total_visitors'])
+        
+        if len(clean_data) == 0:
+            raise HTTPException(status_code=503, detail="Žádná platná data nejsou k dispozici")
+        
         # Výpočet statistik
         total_visitors = int(historical_data["total_visitors"].sum())
         avg_daily = float(historical_data["total_visitors"].mean())
@@ -443,6 +482,8 @@ async def get_statistics():
             "data_start_date": historical_data["date"].min().strftime("%Y-%m-%d"),
             "data_end_date": historical_data["date"].max().strftime("%Y-%m-%d"),
         }
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(
             status_code=500, detail=f"Chyba při výpočtu statistik: {str(e)}"
@@ -458,24 +499,36 @@ async def get_historical_data(days: int = 30):
         raise HTTPException(status_code=503, detail="Historická data nejsou dostupná")
 
     try:
+        # Odfiltrovat NaN hodnoty
+        clean_data = historical_data.dropna(subset=['total_visitors'])
+        
+        if len(clean_data) == 0:
+            raise HTTPException(status_code=503, detail="Žádná platná data nejsou k dispozici")
+        
         # Získat poslední N dní
-        recent_data = historical_data.tail(days).copy()
-
+        recent_data = clean_data.tail(days).copy()
+        
         data_points = []
         for _, row in recent_data.iterrows():
-            data_points.append(
-                {
-                    "date": row["date"].strftime("%Y-%m-%d"),
-                    "visitors": int(row["total_visitors"]),
-                }
-            )
-
+            visitors = row['total_visitors']
+            # Další kontrola pro jistotu
+            if pd.notna(visitors):
+                data_points.append({
+                    "date": row['date'].strftime('%Y-%m-%d'),
+                    "visitors": int(visitors)
+                })
+        
+        if len(data_points) == 0:
+            raise HTTPException(status_code=503, detail="Žádná platná data pro zadané období")
+        
         return {
             "data": data_points,
             "start_date": recent_data["date"].min().strftime("%Y-%m-%d"),
             "end_date": recent_data["date"].max().strftime("%Y-%m-%d"),
             "total_days": len(data_points),
         }
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Chyba při načítání dat: {str(e)}")
 
@@ -491,6 +544,8 @@ async def predict(
     Použije ensemble model (LightGBM + XGBoost + CatBoost) pro predikci.
     Automaticky detekuje svátky a získává informace o počasí.
     Uloží predikci do databáze s verzováním.
+    
+    DŮLEŽITÉ: Nepřijímá predikce do minulosti (pouze budoucí data).
     """
     if not models:
         raise HTTPException(status_code=503, detail="Modely nejsou načteny")
@@ -498,7 +553,16 @@ async def predict(
     try:
         # Parsování data
         pred_date = pd.to_datetime(request.date).date()
-
+        
+        # ========== VALIDACE: ZAKÁZAT PREDIKCE DO MINULOSTI ==========
+        if DATABASE_ENABLED and not validate_future_date(pred_date):
+            today = date.today()
+            raise HTTPException(
+                status_code=400,
+                detail=f"Nelze vytvořit predikci do minulosti. Požadované datum: {pred_date}, Dnešní datum: {today}. "
+                       f"Predikce jsou povoleny pouze pro budoucí data."
+            )
+        
         # Zkusit najít datum v historických datech (může obsahovat předvyplněné holiday features)
         existing_row = None
         if historical_data is not None:
@@ -710,6 +774,8 @@ async def predict_range(request: RangePredictionRequest):
 
     Vytvoří predikce pro každý den v zadaném období.
     Automaticky stahuje weather data pro každý den z Open-Meteo API.
+    
+    DŮLEŽITÉ: Nepřijímá predikce do minulosti (pouze budoucí data).
     """
     if not models:
         raise HTTPException(status_code=503, detail="Modely nejsou načteny")
@@ -721,10 +787,18 @@ async def predict_range(request: RangePredictionRequest):
         end_date = pd.to_datetime(request.end_date)
 
         if start_date > end_date:
-            raise HTTPException(
-                status_code=400, detail="start_date musí být před end_date"
-            )
-
+            raise HTTPException(status_code=400, detail="start_date musí být před end_date")
+        
+        # ========== VALIDACE: ZAKÁZAT PREDIKCE DO MINULOSTI ==========
+        if DATABASE_ENABLED:
+            today = date.today()
+            if start_date.date() <= today:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Nelze vytvořit predikci do minulosti. Start datum: {start_date.date()}, Dnešní datum: {today}. "
+                           f"Predikce jsou povoleny pouze pro budoucí data. Použijte start_date > {today}."
+                )
+        
         # Použít funkci z predict.py která automaticky stahuje weather data
         models_dict = {
             "lgb": models["lightgbm"],
