@@ -1,0 +1,16 @@
+{
+  "name": "Techmania Dashboard",
+  "short_name": "Techmania",
+  "description": "Analýza a predikce návštěvnosti science centra Techmania",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#0066CC",
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml"
+    }
+  ]
+}

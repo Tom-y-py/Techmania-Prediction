@@ -35,10 +35,8 @@ instance/
 .webassets-cache
 
 # Models and Data
-models/*.pkl
 models/*.joblib
 *.h5
-*.pkl
 *.joblib
 
 # Jupyter Notebook

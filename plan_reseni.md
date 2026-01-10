@@ -353,3 +353,24 @@ from sklearn.model_selection import train_test_split
 - [Streamlit Documentation](https://docs.streamlit.io/)
 - [Time Series Forecasting Tutorial](https://www.kaggle.com/learn/time-series)
 
+
+
+📊 SUMMARY - WEEKLY PREDICTIONS WITH WEATHER
+==============================================================================================================
+
+Date         Day        Visitors  Weather                               Temp   Srážky
+--------------------------------------------------------------------------------------------------------------
+2026-01-10   Saturday        729  Sněhové přeháňky: slabé              -3.3°C  ❄️ 0.6mm
+2026-01-11   Sunday          425  Polojasno                           -10.4°C   ☀️ 0mm
+2026-01-12   Monday          365  Sněžení: slabé                       -9.3°C  ❄️ 1.3mm
+2026-01-13   Tuesday         439  Neznámé                               1.6°C  🌧️ 0.4mm
+2026-01-14   Wednesday       428  Neznámé                               0.9°C  🌧️ 0.3mm
+2026-01-15   Thursday        461  Mlha                                  1.8°C   ☀️ 0mm
+2026-01-16   Friday          451  Mlha                                 -0.1°C   ☀️ 0mm
+--------------------------------------------------------------------------------------------------------------
+TOTAL (7 days)             3298
+AVERAGE/day                 471
+
+==============================================================================================================
+✅ TESTING COMPLETE!
+==============================================================================================================
