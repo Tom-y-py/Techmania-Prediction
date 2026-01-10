@@ -1,6 +1,9 @@
 'use client';
 
 import { createContext, useContext, useState, useEffect, ReactNode } from 'react';
+import { NextIntlClientProvider } from 'next-intl';
+import csMessages from '../../locale/cs.json';
+import enMessages from '../../locale/en.json';
 
 type Locale = 'cs' | 'en';
 
@@ -11,10 +14,17 @@ interface LocaleContextType {
 
 const LocaleContext = createContext<LocaleContextType | undefined>(undefined);
 
+const messagesMap = {
+  cs: csMessages,
+  en: enMessages,
+};
+
 export function LocaleProvider({ children }: { children: ReactNode }) {
   const [locale, setLocaleState] = useState<Locale>('cs');
+  const [isClient, setIsClient] = useState(false);
 
   useEffect(() => {
+    setIsClient(true);
     // Load saved locale from localStorage only on client side
     const savedSettings = localStorage.getItem('techmania-settings');
     if (savedSettings) {
@@ -49,7 +59,9 @@ export function LocaleProvider({ children }: { children: ReactNode }) {
 
   return (
     <LocaleContext.Provider value={{ locale, setLocale }}>
-      {children}
+      <NextIntlClientProvider locale={locale} messages={messagesMap[locale]}>
+        {children}
+      </NextIntlClientProvider>
     </LocaleContext.Provider>
   );
 }

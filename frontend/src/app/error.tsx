@@ -1,9 +1,10 @@
 'use client';
 
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
+import { NextIntlClientProvider } from 'next-intl';
 import { useTranslations } from '@/lib/i18n';
 
-export default function Error({
+function ErrorContent({
   error,
   reset,
 }: {
@@ -44,5 +45,48 @@ export default function Error({
         </div>
       </div>
     </div>
+  );
+}
+
+export default function Error({
+  error,
+  reset,
+}: {
+  error: Error & { digest?: string };
+  reset: () => void;
+}) {
+  const [messages, setMessages] = useState<any>(null);
+  const [locale, setLocale] = useState<'cs' | 'en'>('cs');
+
+  useEffect(() => {
+    // Load saved locale from localStorage
+    const savedSettings = localStorage.getItem('techmania-settings');
+    if (savedSettings) {
+      try {
+        const settings = JSON.parse(savedSettings);
+        if (settings.language) {
+          setLocale(settings.language);
+        }
+      } catch (error) {
+        console.error('Error loading locale:', error);
+      }
+    }
+  }, []);
+
+  useEffect(() => {
+    // Load messages for current locale
+    import(`../../locale/${locale}.json`)
+      .then((module) => setMessages(module.default))
+      .catch((error) => console.error('Error loading messages:', error));
+  }, [locale]);
+
+  if (!messages) {
+    return null;
+  }
+
+  return (
+    <NextIntlClientProvider locale={locale} messages={messages}>
+      <ErrorContent error={error} reset={reset} />
+    </NextIntlClientProvider>
   );
 }

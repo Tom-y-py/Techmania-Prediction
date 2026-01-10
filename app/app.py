@@ -21,7 +21,11 @@ load_dotenv()
 
 # Import databázových komponent
 try:
-    from database import get_db, init_db, Prediction, HistoricalData, get_next_version
+    from database import (
+        get_db, init_db, Prediction, HistoricalData, TemplateData,
+        get_next_version, validate_future_date, mark_template_complete,
+        get_complete_template_records, get_latest_prediction
+    )
     DATABASE_ENABLED = True
 except ImportError as e:
     print(f"⚠️ Database module not available: {e}")
@@ -164,6 +168,37 @@ class PredictionHistoryResponse(BaseModel):
     date: str
     versions: List[PredictionVersion]
     total_versions: int
+
+# Nové modely pro PATCH endpoint
+class TemplateDataUpdate(BaseModel):
+    """Data pro aktualizaci template záznamu s reálnými hodnotami"""
+    date: str = Field(..., description="Datum ve formátu YYYY-MM-DD", example="2026-01-15")
+    total_visitors: Optional[int] = Field(None, description="Celkový počet návštěvníků")
+    school_visitors: Optional[int] = Field(None, description="Počet školních návštěvníků")
+    public_visitors: Optional[int] = Field(None, description="Počet veřejných návštěvníků")
+    extra: Optional[str] = Field(None, description="Extra poznámky")
+    opening_hours: Optional[str] = Field(None, description="Otevírací doba")
+
+class TemplateDataPatchResponse(BaseModel):
+    """Odpověď z PATCH endpointu"""
+    success: bool
+    message: str
+    date: str
+    was_complete: bool
+    is_complete: bool
+    updated_fields: List[str]
+
+class TemplateDataBatchUpdate(BaseModel):
+    """Batch aktualizace více template záznamů najednou"""
+    updates: List[TemplateDataUpdate] = Field(..., description="Seznam aktualizací")
+
+class TemplateDataBatchResponse(BaseModel):
+    """Odpověď z batch update"""
+    success: bool
+    total_processed: int
+    successful_updates: int
+    failed_updates: int
+    details: List[TemplateDataPatchResponse]
 
 # Načtení modelů při startu
 @app.on_event("startup")
@@ -364,22 +399,29 @@ async def get_statistics():
         raise HTTPException(status_code=503, detail="Historická data nejsou dostupná")
     
     try:
+        # Odfiltrovat NaN hodnoty
+        clean_data = historical_data.dropna(subset=['total_visitors'])
+        
+        if len(clean_data) == 0:
+            raise HTTPException(status_code=503, detail="Žádná platná data nejsou k dispozici")
+        
         # Výpočet statistik
-        total_visitors = int(historical_data['total_visitors'].sum())
-        avg_daily = float(historical_data['total_visitors'].mean())
+        total_visitors = int(clean_data['total_visitors'].sum())
+        avg_daily = float(clean_data['total_visitors'].mean())
         
         # Najít den s nejvyšší návštěvností
-        peak_idx = historical_data['total_visitors'].idxmax()
-        peak_day = historical_data.loc[peak_idx, 'date'].strftime('%d. %B %Y')
-        peak_visitors = int(historical_data.loc[peak_idx, 'total_visitors'])
+        peak_idx = clean_data['total_visitors'].idxmax()
+        peak_day = clean_data.loc[peak_idx, 'date'].strftime('%d. %B %Y')
+        peak_visitors = int(clean_data.loc[peak_idx, 'total_visitors'])
         
         # Vypočítat trend (poslední měsíc vs předchozí měsíc)
-        last_month = historical_data.tail(30)
-        prev_month = historical_data.iloc[-60:-30] if len(historical_data) >= 60 else historical_data.head(30)
+        last_month = clean_data.tail(30)
+        prev_month = clean_data.iloc[-60:-30] if len(clean_data) >= 60 else clean_data.head(30)
         
-        if len(prev_month) > 0:
+        if len(prev_month) > 0 and prev_month['total_visitors'].mean() > 0:
             trend = ((last_month['total_visitors'].mean() - prev_month['total_visitors'].mean()) / 
                     prev_month['total_visitors'].mean() * 100)
+            trend = float(trend) if not np.isnan(trend) else 0.0
         else:
             trend = 0.0
         
@@ -389,9 +431,11 @@ async def get_statistics():
             "peak_day": peak_day,
             "peak_visitors": peak_visitors,
             "trend": round(trend, 1),
-            "data_start_date": historical_data['date'].min().strftime('%Y-%m-%d'),
-            "data_end_date": historical_data['date'].max().strftime('%Y-%m-%d')
+            "data_start_date": clean_data['date'].min().strftime('%Y-%m-%d'),
+            "data_end_date": clean_data['date'].max().strftime('%Y-%m-%d')
         }
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Chyba při výpočtu statistik: {str(e)}")
 
@@ -404,15 +448,27 @@ async def get_historical_data(days: int = 30):
         raise HTTPException(status_code=503, detail="Historická data nejsou dostupná")
     
     try:
+        # Odfiltrovat NaN hodnoty
+        clean_data = historical_data.dropna(subset=['total_visitors'])
+        
+        if len(clean_data) == 0:
+            raise HTTPException(status_code=503, detail="Žádná platná data nejsou k dispozici")
+        
         # Získat poslední N dní
-        recent_data = historical_data.tail(days).copy()
+        recent_data = clean_data.tail(days).copy()
         
         data_points = []
         for _, row in recent_data.iterrows():
-            data_points.append({
-                "date": row['date'].strftime('%Y-%m-%d'),
-                "visitors": int(row['total_visitors'])
-            })
+            visitors = row['total_visitors']
+            # Další kontrola pro jistotu
+            if pd.notna(visitors):
+                data_points.append({
+                    "date": row['date'].strftime('%Y-%m-%d'),
+                    "visitors": int(visitors)
+                })
+        
+        if len(data_points) == 0:
+            raise HTTPException(status_code=503, detail="Žádná platná data pro zadané období")
         
         return {
             "data": data_points,
@@ -420,6 +476,8 @@ async def get_historical_data(days: int = 30):
             "end_date": recent_data['date'].max().strftime('%Y-%m-%d'),
             "total_days": len(data_points)
         }
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Chyba při načítání dat: {str(e)}")
 
@@ -431,6 +489,8 @@ async def predict(request: PredictionRequest, db: Session = Depends(get_db) if D
     Použije ensemble model (LightGBM + XGBoost + CatBoost) pro predikci.
     Automaticky detekuje svátky a získává informace o počasí.
     Uloží predikci do databáze s verzováním.
+    
+    DŮLEŽITÉ: Nepřijímá predikce do minulosti (pouze budoucí data).
     """
     if not models:
         raise HTTPException(status_code=503, detail="Modely nejsou načteny")
@@ -438,6 +498,15 @@ async def predict(request: PredictionRequest, db: Session = Depends(get_db) if D
     try:
         # Parsování data
         pred_date = pd.to_datetime(request.date).date()
+        
+        # ========== VALIDACE: ZAKÁZAT PREDIKCE DO MINULOSTI ==========
+        if DATABASE_ENABLED and not validate_future_date(pred_date):
+            today = date.today()
+            raise HTTPException(
+                status_code=400,
+                detail=f"Nelze vytvořit predikci do minulosti. Požadované datum: {pred_date}, Dnešní datum: {today}. "
+                       f"Predikce jsou povoleny pouze pro budoucí data."
+            )
         
         # Zkusit najít datum v historických datech (může obsahovat předvyplněné holiday features)
         existing_row = None
@@ -607,6 +676,8 @@ async def predict_range(request: RangePredictionRequest):
     
     Vytvoří predikce pro každý den v zadaném období.
     Automaticky stahuje weather data pro každý den z Open-Meteo API.
+    
+    DŮLEŽITÉ: Nepřijímá predikce do minulosti (pouze budoucí data).
     """
     if not models:
         raise HTTPException(status_code=503, detail="Modely nejsou načteny")
@@ -619,6 +690,16 @@ async def predict_range(request: RangePredictionRequest):
         
         if start_date > end_date:
             raise HTTPException(status_code=400, detail="start_date musí být před end_date")
+        
+        # ========== VALIDACE: ZAKÁZAT PREDIKCE DO MINULOSTI ==========
+        if DATABASE_ENABLED:
+            today = date.today()
+            if start_date.date() <= today:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Nelze vytvořit predikci do minulosti. Start datum: {start_date.date()}, Dnešní datum: {today}. "
+                           f"Predikce jsou povoleny pouze pro budoucí data. Použijte start_date > {today}."
+                )
         
         # Použít funkci z predict.py která automaticky stahuje weather data
         models_dict = {
@@ -868,6 +949,305 @@ async def get_historical_from_db(
         }
     
     raise HTTPException(status_code=503, detail="Historická data nejsou dostupná")
+
+
+# ========== NOVÉ ENDPOINTY PRO TEMPLATE DATA A PATCH ==========
+
+@app.patch("/template/update", response_model=TemplateDataPatchResponse, tags=["Template"])
+async def update_template_record(
+    update_data: TemplateDataUpdate,
+    db: Session = Depends(get_db)
+):
+    """
+    PATCH endpoint pro aktualizaci template záznamu s reálnými daty.
+    
+    Když Techmania přidá reálná data do Excelu (např. návštěvnost pro 1.1.2026),
+    tento endpoint detekuje změnu, aktualizuje záznam v DB a nastaví flag is_complete=True.
+    
+    Kompletní záznamy se pak mohou použít pro grafy a statistiky.
+    """
+    if not DATABASE_ENABLED:
+        raise HTTPException(status_code=503, detail="Database not available")
+    
+    try:
+        # Parse date
+        record_date = pd.to_datetime(update_data.date).date()
+        
+        # Find template record
+        template_record = db.query(TemplateData)\
+            .filter(TemplateData.date == record_date)\
+            .first()
+        
+        if not template_record:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Template záznam pro datum {update_data.date} nebyl nalezen"
+            )
+        
+        # Track what was updated
+        was_complete = template_record.is_complete
+        updated_fields = []
+        
+        # Update visitor data if provided
+        if update_data.total_visitors is not None:
+            template_record.total_visitors = update_data.total_visitors
+            updated_fields.append("total_visitors")
+        
+        if update_data.school_visitors is not None:
+            template_record.school_visitors = update_data.school_visitors
+            updated_fields.append("school_visitors")
+        
+        if update_data.public_visitors is not None:
+            template_record.public_visitors = update_data.public_visitors
+            updated_fields.append("public_visitors")
+        
+        if update_data.extra is not None:
+            template_record.extra = update_data.extra
+            updated_fields.append("extra")
+        
+        if update_data.opening_hours is not None:
+            template_record.opening_hours = update_data.opening_hours
+            updated_fields.append("opening_hours")
+        
+        # If total_visitors was added, mark as complete
+        if update_data.total_visitors is not None and not was_complete:
+            template_record.is_complete = True
+            template_record.completed_at = datetime.utcnow()
+            updated_fields.append("is_complete")
+        
+        template_record.updated_at = datetime.utcnow()
+        db.commit()
+        
+        return TemplateDataPatchResponse(
+            success=True,
+            message=f"Záznam pro {update_data.date} byl úspěšně aktualizován" + 
+                   (" a označen jako kompletní" if not was_complete and template_record.is_complete else ""),
+            date=update_data.date,
+            was_complete=was_complete,
+            is_complete=template_record.is_complete,
+            updated_fields=updated_fields
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Chyba při aktualizaci: {str(e)}")
+
+
+@app.patch("/template/batch-update", response_model=TemplateDataBatchResponse, tags=["Template"])
+async def batch_update_template_records(
+    batch_data: TemplateDataBatchUpdate,
+    db: Session = Depends(get_db)
+):
+    """
+    Batch PATCH endpoint pro aktualizaci více template záznamů najednou.
+    
+    Umožňuje nahrát celý Excel soubor s více dny najednou.
+    """
+    if not DATABASE_ENABLED:
+        raise HTTPException(status_code=503, detail="Database not available")
+    
+    results = []
+    successful = 0
+    failed = 0
+    
+    for update_data in batch_data.updates:
+        try:
+            # Parse date
+            record_date = pd.to_datetime(update_data.date).date()
+            
+            # Find template record
+            template_record = db.query(TemplateData)\
+                .filter(TemplateData.date == record_date)\
+                .first()
+            
+            if not template_record:
+                results.append(TemplateDataPatchResponse(
+                    success=False,
+                    message=f"Záznam pro {update_data.date} nebyl nalezen",
+                    date=update_data.date,
+                    was_complete=False,
+                    is_complete=False,
+                    updated_fields=[]
+                ))
+                failed += 1
+                continue
+            
+            # Track changes
+            was_complete = template_record.is_complete
+            updated_fields = []
+            
+            # Update fields
+            if update_data.total_visitors is not None:
+                template_record.total_visitors = update_data.total_visitors
+                updated_fields.append("total_visitors")
+            
+            if update_data.school_visitors is not None:
+                template_record.school_visitors = update_data.school_visitors
+                updated_fields.append("school_visitors")
+            
+            if update_data.public_visitors is not None:
+                template_record.public_visitors = update_data.public_visitors
+                updated_fields.append("public_visitors")
+            
+            if update_data.extra is not None:
+                template_record.extra = update_data.extra
+                updated_fields.append("extra")
+            
+            if update_data.opening_hours is not None:
+                template_record.opening_hours = update_data.opening_hours
+                updated_fields.append("opening_hours")
+            
+            # Mark as complete if total_visitors was added
+            if update_data.total_visitors is not None and not was_complete:
+                template_record.is_complete = True
+                template_record.completed_at = datetime.utcnow()
+                updated_fields.append("is_complete")
+            
+            template_record.updated_at = datetime.utcnow()
+            
+            results.append(TemplateDataPatchResponse(
+                success=True,
+                message=f"Úspěšně aktualizováno",
+                date=update_data.date,
+                was_complete=was_complete,
+                is_complete=template_record.is_complete,
+                updated_fields=updated_fields
+            ))
+            successful += 1
+            
+        except Exception as e:
+            results.append(TemplateDataPatchResponse(
+                success=False,
+                message=f"Chyba: {str(e)}",
+                date=update_data.date,
+                was_complete=False,
+                is_complete=False,
+                updated_fields=[]
+            ))
+            failed += 1
+    
+    # Commit all changes at once
+    try:
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Chyba při ukládání: {str(e)}")
+    
+    return TemplateDataBatchResponse(
+        success=successful > 0,
+        total_processed=len(batch_data.updates),
+        successful_updates=successful,
+        failed_updates=failed,
+        details=results
+    )
+
+
+@app.get("/template/status", tags=["Template"])
+async def get_template_status(
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    complete_only: bool = False,
+    db: Session = Depends(get_db)
+):
+    """
+    Získá status template záznamů - které mají kompletní data a které ne.
+    
+    Args:
+        start_date: Filtr od data (YYYY-MM-DD)
+        end_date: Filtr do data (YYYY-MM-DD)
+        complete_only: Vrátit pouze kompletní záznamy
+    """
+    if not DATABASE_ENABLED:
+        raise HTTPException(status_code=503, detail="Database not available")
+    
+    try:
+        query = db.query(TemplateData)
+        
+        if start_date:
+            start = pd.to_datetime(start_date).date()
+            query = query.filter(TemplateData.date >= start)
+        
+        if end_date:
+            end = pd.to_datetime(end_date).date()
+            query = query.filter(TemplateData.date <= end)
+        
+        if complete_only:
+            query = query.filter(TemplateData.is_complete == True)
+        
+        records = query.order_by(TemplateData.date).all()
+        
+        results = []
+        for record in records:
+            results.append({
+                "date": record.date.isoformat(),
+                "is_complete": record.is_complete,
+                "completed_at": record.completed_at.isoformat() if record.completed_at else None,
+                "total_visitors": record.total_visitors,
+                "has_visitor_data": record.total_visitors is not None,
+                "day_of_week": record.day_of_week,
+                "is_weekend": record.is_weekend,
+                "is_holiday": record.is_holiday
+            })
+        
+        complete_count = sum(1 for r in results if r["is_complete"])
+        
+        return {
+            "total_records": len(results),
+            "complete_records": complete_count,
+            "incomplete_records": len(results) - complete_count,
+            "data": results
+        }
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Chyba při načítání statusu: {str(e)}")
+
+
+@app.get("/template/complete", tags=["Template"])
+async def get_complete_template_data(
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    db: Session = Depends(get_db)
+):
+    """
+    Získá všechny kompletní template záznamy (s reálnými daty).
+    Tyto záznamy se mohou použít pro grafy a statistiky.
+    """
+    if not DATABASE_ENABLED:
+        raise HTTPException(status_code=503, detail="Database not available")
+    
+    try:
+        start = pd.to_datetime(start_date).date() if start_date else None
+        end = pd.to_datetime(end_date).date() if end_date else None
+        
+        records = get_complete_template_records(db, start, end)
+        
+        results = []
+        for record in records:
+            results.append({
+                "date": record.date.isoformat(),
+                "total_visitors": record.total_visitors,
+                "school_visitors": record.school_visitors,
+                "public_visitors": record.public_visitors,
+                "day_of_week": record.day_of_week,
+                "temperature_mean": record.temperature_mean,
+                "precipitation": record.precipitation,
+                "is_weekend": record.is_weekend,
+                "is_holiday": record.is_holiday,
+                "is_nice_weather": record.is_nice_weather,
+                "completed_at": record.completed_at.isoformat() if record.completed_at else None
+            })
+        
+        return {
+            "source": "template_data",
+            "complete_records": len(results),
+            "data": results
+        }
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Chyba při načítání dat: {str(e)}")
+
 
 if __name__ == '__main__':
     import uvicorn
