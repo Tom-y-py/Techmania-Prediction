@@ -11,7 +11,12 @@ import pandas as pd
 import numpy as np
 import joblib
 import sys
+import os
 from pathlib import Path
+from dotenv import load_dotenv
+
+# Načíst proměnné prostředí
+load_dotenv()
 
 # Přidat src do path
 sys.path.append(str(Path(__file__).parent.parent / 'src'))
@@ -19,17 +24,27 @@ sys.path.append(str(Path(__file__).parent.parent / 'src'))
 from feature_engineering import create_features
 from services import holiday_service, weather_service
 
+# Konfigurace z .env
+ENVIRONMENT = os.getenv('ENVIRONMENT', 'development')
+HOST = os.getenv('HOST', '0.0.0.0')
+PORT = int(os.getenv('PORT', '5000'))
+CORS_ORIGINS = os.getenv('CORS_ORIGINS', 'http://localhost:3000').split(',')
+API_TITLE = os.getenv('API_TITLE', 'Techmania Prediction API')
+API_VERSION = os.getenv('API_VERSION', '2.0.0')
+DEBUG = os.getenv('DEBUG', 'true').lower() == 'true'
+
 # Inicializace FastAPI
 app = FastAPI(
-    title="Techmania Prediction API",
+    title=API_TITLE,
     description="API pro predikci návštěvnosti Techmanie pomocí ensemble modelu",
-    version="2.0.0"
+    version=API_VERSION,
+    debug=DEBUG
 )
 
-# CORS middleware
+# CORS middleware s konfigurací podle prostředí
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # V produkci nastavit konkrétní domény
+    allow_origins=[origin.strip() for origin in CORS_ORIGINS],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -114,8 +129,9 @@ async def load_models():
     """Načte všechny natrénované modely a historická data."""
     global models, feature_columns, ensemble_weights, historical_data
     
-    models_dir = Path(__file__).parent.parent / 'models'
-    data_dir = Path(__file__).parent.parent / 'data' / 'raw'
+    # Cesty v Docker kontejneru
+    models_dir = Path('/app/models')
+    data_dir = Path('/app/data/raw')
     
     try:
         # Načtení jednotlivých modelů

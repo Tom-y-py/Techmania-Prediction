@@ -11,7 +11,7 @@ export default function HealthStatus() {
   useEffect(() => {
     const checkHealth = async () => {
       try {
-        const health = await api.healthCheck();
+        const health = await api.health();
         setStatus(health);
       } catch (error) {
         console.error('Health check failed:', error);

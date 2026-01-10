@@ -5,6 +5,7 @@ import Header from '@/components/Header';
 import StatsCards from '@/components/StatsCards';
 import VisitorChart from '@/components/VisitorChart';
 import RangePredictionForm from '@/components/RangePredictionForm';
+import { API_URL, ENVIRONMENT } from '@/lib/api';
 
 export default function Home() {
   return (
@@ -62,10 +63,13 @@ export default function Home() {
                     </label>
                     <input
                       type="text"
-                      defaultValue="http://localhost:8000"
+                      value={API_URL}
                       disabled
                       className="mt-1 block w-full rounded-md border-gray-300 bg-gray-50 shadow-sm sm:text-sm px-3 py-2"
                     />
+                    <p className="mt-1 text-xs text-gray-500">
+                      Prostředí: <span className="font-semibold">{ENVIRONMENT}</span>
+                    </p>
                   </div>
                   
                   <div className="rounded-md bg-blue-50 p-4">
