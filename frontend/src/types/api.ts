@@ -139,3 +139,34 @@ export interface CalendarHeatmapData {
   day_of_week: number;
   week_of_year: number;
 }
+
+// Typy pro historii predikcí
+export interface PredictionHistoryItem {
+  date: string;
+  predicted: number;
+  actual: number | null;
+  error: number | null;
+  error_percent: number | null;
+  version: number;
+  created_at: string | null;
+  confidence_lower: number | null;
+  confidence_upper: number | null;
+  within_confidence: boolean;
+  is_future: boolean;
+}
+
+export interface PredictionHistorySummary {
+  total_predictions: number;
+  valid_comparisons: number;
+  avg_error: number | null;
+  avg_error_percent: number | null;
+  predictions_within_10_percent: number;
+  predictions_within_20_percent: number;
+  accuracy_10_percent: number | null;
+  accuracy_20_percent: number | null;
+}
+
+export interface PredictionHistoryResponse {
+  history: PredictionHistoryItem[];
+  summary: PredictionHistorySummary;
+}

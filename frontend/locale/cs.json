@@ -100,11 +100,15 @@
   "chart": {
     "title": "Návštěvnost za poslední měsíc",
     "actualVisitors": "Skutečná návštěvnost",
-    "predictedVisitors": "Předpověď návštěvnosti",
+    "predictedVisitors": "Budoucí předpověď",
+    "historicalPrediction": "Historická predikce",
     "confidenceUpper": "Horní interval spolehlivosti",
     "confidenceLower": "Dolní interval spolehlivosti",
     "error": "Nepodařilo se načíst historická data",
-    "notAvailable": "Historická data nejsou dostupná"
+    "notAvailable": "Historická data nejsou dostupná",
+    "predictionAccuracy": "Přesnost predikcí",
+    "accuracyLabel": "Přesnost (±10%)",
+    "avgError": "Průměrná odchylka"
   },
   "analytics": {
     "title": "Datová analytika",
@@ -210,6 +214,30 @@
       "minimum": "Minimum",
       "trend": "Trend",
       "noData": "Žádná data k zobrazení"
+    },
+    "predictionHistory": {
+      "title": "Historie predikcí",
+      "period": "Období",
+      "days": "dní",
+      "actual": "Skutečnost",
+      "predicted": "Predikce",
+      "error": "Chyba",
+      "errorPercent": "Chyba (%)",
+      "status": "Status",
+      "totalPredictions": "Celkem predikcí",
+      "avgError": "Průměrná chyba",
+      "accuracy10": "Přesnost ±10%",
+      "accuracy20": "Přesnost ±20%",
+      "comparisonChart": "Porovnání predikce a skutečnosti",
+      "errorChart": "Procentuální odchylka",
+      "detailTable": "Detailní přehled",
+      "date": "Datum",
+      "noData": "Zatím nejsou k dispozici žádné historické predikce. Po vytvoření predikcí zde uvidíte porovnání s reálnými daty.",
+      "noHistoryYet": "Zatím nejsou k dispozici žádná data pro porovnání.",
+      "createPredictions": "Po vytvoření predikcí a po uplynutí predikovaných dnů zde uvidíte porovnání s reálnými daty.",
+      "futurePredictions": "Čekající predikce",
+      "futurePredictionsDesc": "Máte predikce pro budoucí data. Po uplynutí těchto dnů zde uvidíte porovnání s reálnou návštěvností.",
+      "visitors": "návštěvníků"
     }
   },
   "predictions": {

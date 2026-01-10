@@ -54,7 +54,7 @@ export default function RangePredictionForm() {
   return (
     <div className="bg-white dark:bg-gray-800 shadow-sm ring-1 ring-gray-900/5 dark:ring-gray-700 sm:rounded-xl">
       <div className="px-4 py-6 sm:p-8">
-        <div className="max-w-4xl">
+        <div className="w-full">
           <h2 className="text-base font-semibold leading-7 text-gray-900 dark:text-white">
             {t('rangeTitle')}
           </h2>

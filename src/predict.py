@@ -618,8 +618,9 @@ def predict_date_range(start_date, end_date, models_dict):
     # Vytvořit DataFrame s novými daty
     df_new = pd.DataFrame(new_rows)
     
-    # Spojit historická data s novými daty
+    # Spojit historická data s novými daty - odstranit duplicity
     df_combined = pd.concat([df_historical, df_new], ignore_index=True)
+    df_combined = df_combined.drop_duplicates(subset=['date'], keep='last')  # Preferovat nová weather data
     df_combined = df_combined.sort_values('date').reset_index(drop=True)
     
     print(f"✅ Weather data downloaded for {len(df_new)} days")

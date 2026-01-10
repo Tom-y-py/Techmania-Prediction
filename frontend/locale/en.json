@@ -100,11 +100,15 @@
   "chart": {
     "title": "Visitor Traffic - Last Month",
     "actualVisitors": "Actual Visitors",
-    "predictedVisitors": "Predicted Visitors",
+    "predictedVisitors": "Future Prediction",
+    "historicalPrediction": "Historical Prediction",
     "confidenceUpper": "Upper Confidence Interval",
     "confidenceLower": "Lower Confidence Interval",
     "error": "Failed to load historical data",
-    "notAvailable": "Historical data is not available"
+    "notAvailable": "Historical data is not available",
+    "predictionAccuracy": "Prediction Accuracy",
+    "accuracyLabel": "Accuracy (±10%)",
+    "avgError": "Average Deviation"
   },
   "analytics": {
     "title": "Data Analytics",
@@ -210,6 +214,30 @@
       "minimum": "Minimum",
       "trend": "Trend",
       "noData": "No data to display"
+    },
+    "predictionHistory": {
+      "title": "Prediction History",
+      "period": "Period",
+      "days": "days",
+      "actual": "Actual",
+      "predicted": "Predicted",
+      "error": "Error",
+      "errorPercent": "Error (%)",
+      "status": "Status",
+      "totalPredictions": "Total Predictions",
+      "avgError": "Average Error",
+      "accuracy10": "Accuracy ±10%",
+      "accuracy20": "Accuracy ±20%",
+      "comparisonChart": "Prediction vs Actual Comparison",
+      "errorChart": "Percentage Deviation",
+      "detailTable": "Detailed Overview",
+      "date": "Date",
+      "noData": "No historical predictions available yet. After creating predictions, you will see comparison with actual data here.",
+      "noHistoryYet": "No data available for comparison yet.",
+      "createPredictions": "After creating predictions and after the predicted days have passed, you will see comparison with actual data here.",
+      "futurePredictions": "Pending Predictions",
+      "futurePredictionsDesc": "You have predictions for future dates. After these days pass, you will see comparison with actual attendance here.",
+      "visitors": "visitors"
     }
   },
   "predictions": {
