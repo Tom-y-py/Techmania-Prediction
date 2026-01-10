@@ -4,14 +4,17 @@ import { Fragment } from 'react';
 import { Disclosure, Menu, Transition } from '@headlessui/react';
 import { BellIcon } from '@heroicons/react/24/outline';
 import HealthStatus from './HealthStatus';
+import { useTranslations } from '@/lib/i18n';
 
 export default function Header() {
+  const t = useTranslations('header');
+  
   return (
-    <div className="sticky top-0 z-40 flex h-16 shrink-0 items-center gap-x-4 border-b border-gray-200 bg-white px-4 shadow-sm sm:gap-x-6 sm:px-6 lg:px-8">
+    <div className="sticky top-0 z-40 flex h-16 shrink-0 items-center gap-x-4 border-b border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 px-4 shadow-sm sm:gap-x-6 sm:px-6 lg:px-8">
       <div className="flex flex-1 gap-x-4 self-stretch lg:gap-x-6">
         <div className="relative flex flex-1 items-center">
-          <h2 className="text-lg font-semibold text-gray-900">
-            Techmania Dashboard
+          <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
+            {t('title')}
           </h2>
         </div>
         <div className="flex items-center gap-x-4 lg:gap-x-6">
@@ -19,26 +22,26 @@ export default function Header() {
           
           <button
             type="button"
-            className="-m-2.5 p-2.5 text-gray-400 hover:text-gray-500"
+            className="-m-2.5 p-2.5 text-gray-400 hover:text-gray-500 dark:text-gray-300 dark:hover:text-gray-200"
           >
-            <span className="sr-only">Zobrazit notifikace</span>
+            <span className="sr-only">{t('notifications')}</span>
             <BellIcon className="h-6 w-6" aria-hidden="true" />
           </button>
 
           <div
-            className="hidden lg:block lg:h-6 lg:w-px lg:bg-gray-200"
+            className="hidden lg:block lg:h-6 lg:w-px lg:bg-gray-200 dark:bg-gray-700"
             aria-hidden="true"
           />
 
           <Menu as="div" className="relative">
             <Menu.Button className="-m-1.5 flex items-center p-1.5">
-              <span className="sr-only">Otevřít uživatelské menu</span>
+              <span className="sr-only">{t('userMenu')}</span>
               <div className="h-8 w-8 rounded-full bg-techmania-blue flex items-center justify-center">
                 <span className="text-sm font-medium text-white">TC</span>
               </div>
               <span className="hidden lg:flex lg:items-center">
                 <span
-                  className="ml-4 text-sm font-semibold leading-6 text-gray-900"
+                  className="ml-4 text-sm font-semibold leading-6 text-gray-900 dark:text-white"
                   aria-hidden="true"
                 >
                   Techmania
@@ -63,7 +66,7 @@ export default function Header() {
                         active ? 'bg-gray-50' : ''
                       } block px-3 py-1 text-sm leading-6 text-gray-900`}
                     >
-                      Profil
+                      {t('profile')}
                     </a>
                   )}
                 </Menu.Item>
@@ -75,7 +78,7 @@ export default function Header() {
                         active ? 'bg-gray-50' : ''
                       } block px-3 py-1 text-sm leading-6 text-gray-900`}
                     >
-                      Odhlásit se
+                      {t('logout')}
                     </a>
                   )}
                 </Menu.Item>

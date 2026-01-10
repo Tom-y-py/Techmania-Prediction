@@ -9,8 +9,10 @@ import {
 } from '@heroicons/react/24/outline';
 import { api } from '@/lib/api';
 import type { StatsResponse } from '@/types/api';
+import { useTranslations } from '@/lib/i18n';
 
 export default function StatsCards() {
+  const t = useTranslations('stats');
   const [stats, setStats] = useState<StatsResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -22,7 +24,7 @@ export default function StatsCards() {
         setStats(data);
       } catch (err: any) {
         console.error('Failed to fetch stats:', err);
-        setError(err.response?.data?.detail || 'Nepodařilo se načíst statistiky');
+        setError(err.response?.data?.detail || t('error'));
       } finally {
         setLoading(false);
       }
@@ -47,9 +49,9 @@ export default function StatsCards() {
 
   if (error || !stats) {
     return (
-      <div className="rounded-lg bg-red-50 p-4">
-        <p className="text-sm text-red-800">
-          {error || 'Statistiky nejsou dostupné'}
+      <div className="rounded-lg bg-red-50 dark:bg-red-900/20 p-4">
+        <p className="text-sm text-red-800 dark:text-red-300">
+          {error || t('notAvailable')}
         </p>
       </div>
     );
@@ -57,31 +59,31 @@ export default function StatsCards() {
 
   const cards = [
     {
-      name: 'Celkový počet návštěvníků',
+      name: t('totalVisitors'),
       value: stats.total_visitors.toLocaleString('cs-CZ'),
       icon: UsersIcon,
-      change: `Období: ${new Date(stats.data_start_date).toLocaleDateString('cs-CZ')} - ${new Date(stats.data_end_date).toLocaleDateString('cs-CZ')}`,
+      change: `${t('period')}: ${new Date(stats.data_start_date).toLocaleDateString('cs-CZ')} - ${new Date(stats.data_end_date).toLocaleDateString('cs-CZ')}`,
       changeType: 'neutral' as const,
     },
     {
-      name: 'Průměr návštěvníků/den',
+      name: t('avgDaily'),
       value: Math.round(stats.avg_daily_visitors).toLocaleString('cs-CZ'),
       icon: ChartBarSquareIcon,
-      change: `${stats.trend > 0 ? '+' : ''}${stats.trend}% trend`,
+      change: `${stats.trend > 0 ? '+' : ''}${stats.trend}% ${t('trend')}`,
       changeType: stats.trend > 0 ? 'positive' as const : stats.trend < 0 ? 'negative' as const : 'neutral' as const,
     },
     {
-      name: 'Den s nejvyšší návštěvností',
+      name: t('peakDay'),
       value: stats.peak_day,
       icon: CalendarDaysIcon,
-      change: `${stats.peak_visitors.toLocaleString('cs-CZ')} návštěvníků`,
+      change: `${stats.peak_visitors.toLocaleString('cs-CZ')} ${t('visitors')}`,
       changeType: 'neutral' as const,
     },
     {
-      name: 'Měsíční trend',
+      name: t('monthlyTrend'),
       value: `${stats.trend > 0 ? '+' : ''}${stats.trend}%`,
       icon: ArrowTrendingUpIcon,
-      change: stats.trend > 0 ? 'Rostoucí tendence' : stats.trend < 0 ? 'Klesající tendence' : 'Stabilní',
+      change: stats.trend > 0 ? t('rising') : stats.trend < 0 ? t('falling') : t('stable'),
       changeType: stats.trend > 0 ? 'positive' as const : stats.trend < 0 ? 'negative' as const : 'neutral' as const,
     },
   ];
@@ -91,7 +93,7 @@ export default function StatsCards() {
       {cards.map((card) => (
         <div
           key={card.name}
-          className="overflow-hidden rounded-lg bg-white shadow hover:shadow-lg transition-shadow"
+          className="overflow-hidden rounded-lg bg-white dark:bg-gray-800 shadow hover:shadow-lg transition-shadow"
         >
           <div className="p-6">
             <div className="flex items-center">
@@ -100,15 +102,15 @@ export default function StatsCards() {
               </div>
               <div className="ml-5 w-0 flex-1">
                 <dl>
-                  <dt className="truncate text-sm font-medium text-gray-500">{card.name}</dt>
+                  <dt className="truncate text-sm font-medium text-gray-500 dark:text-gray-400">{card.name}</dt>
                   <dd>
-                    <div className="text-2xl font-bold text-gray-900">{card.value}</div>
+                    <div className="text-2xl font-bold text-gray-900 dark:text-white">{card.value}</div>
                   </dd>
                 </dl>
               </div>
             </div>
           </div>
-          <div className="bg-gray-50 px-6 py-3">
+          <div className="bg-gray-50 dark:bg-gray-900 px-6 py-3">
             <div className="text-sm">
               <span
                 className={

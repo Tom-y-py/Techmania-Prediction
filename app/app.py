@@ -212,6 +212,7 @@ async def root():
         }
     }
 
+
 @app.get("/health", response_model=HealthResponse, tags=["Info"])
 async def health_check():
     """Health check endpoint."""

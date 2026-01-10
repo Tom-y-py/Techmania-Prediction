@@ -4,3 +4,7 @@ export { default as StatsCards } from './StatsCards';
 export { default as VisitorChart } from './VisitorChart';
 export { default as RangePredictionForm } from './RangePredictionForm';
 export { default as HealthStatus } from './HealthStatus';
+export { default as CalendarHeatmap } from './CalendarHeatmap';
+export { default as SeasonalityChart } from './SeasonalityChart';
+export { default as CorrelationAnalysis } from './CorrelationAnalysis';
+export { default as TrendAnalysis } from './TrendAnalysis';

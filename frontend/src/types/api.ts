@@ -95,3 +95,47 @@ export interface HistoricalDataResponse {
   end_date: string;
   total_days: number;
 }
+
+export interface TodayVisitorsResponse {
+  date: string;
+  current_visitors: number;
+  predicted_visitors: number;
+  difference: number;
+  percentage_difference: number;
+  last_updated: string;
+}
+
+export type TimeRange = 'daily' | 'weekly' | 'monthly' | 'quarterly' | 'yearly';
+
+export interface AggregatedDataPoint {
+  period: string;
+  visitors: number;
+  avg_visitors?: number;
+  min_visitors?: number;
+  max_visitors?: number;
+}
+
+export interface SeasonalityData {
+  by_weekday: { [key: string]: number };
+  by_month: { [key: string]: number };
+  by_hour?: { [key: string]: number };
+  holiday_vs_regular: {
+    holiday_avg: number;
+    regular_avg: number;
+    difference: number;
+  };
+}
+
+export interface CorrelationData {
+  weather_correlation: number;
+  temperature_correlation: number;
+  holiday_impact: number;
+  weekend_impact: number;
+}
+
+export interface CalendarHeatmapData {
+  date: string;
+  visitors: number;
+  day_of_week: number;
+  week_of_year: number;
+}
