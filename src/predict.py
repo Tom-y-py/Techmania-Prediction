@@ -20,7 +20,8 @@ try:
     from services import weather_service, holiday_service
     SERVICES_AVAILABLE = True
 except ImportError:
-    print("⚠️ Weather/Holiday services nedostupné - použijí se průměrné hodnoty")
+    print("❌ CHYBA: Weather/Holiday services nejsou dostupné!")
+    print("   Predikce nelze provést bez reálných dat o počasí.")
     SERVICES_AVAILABLE = False
 
 
@@ -85,6 +86,9 @@ def predict_single_date(date, models_dict, historical_df=None):
     # Získat weather data pro predikované datum
     weather_data = {}
     weather_description = None
+    if not SERVICES_AVAILABLE:
+        raise RuntimeError("Weather services not available. Cannot make prediction without real weather data.")
+    
     if SERVICES_AVAILABLE:
         try:
             pred_date = date.date() if isinstance(date, pd.Timestamp) else date
@@ -92,12 +96,12 @@ def predict_single_date(date, models_dict, historical_df=None):
             
             weather_description = weather_info.get('weather_description', 'N/A')
             
-            # Základní hodnoty z API
+            # Základní hodnoty z API 
             weather_data = {
-                'temperature_max': weather_info.get('temperature_max'),
-                'temperature_min': weather_info.get('temperature_min'),
-                'temperature_mean': weather_info.get('temperature_mean'),
-                'precipitation': weather_info.get('precipitation'),
+                'temperature_max': weather_info['temperature_max'],
+                'temperature_min': weather_info['temperature_min'],
+                'temperature_mean': weather_info['temperature_mean'],
+                'precipitation': weather_info['precipitation'],
                 'rain': weather_info.get('rain'),
                 'snowfall': weather_info.get('snowfall'),
                 'precipitation_hours': weather_info.get('precipitation_hours'),
@@ -111,7 +115,7 @@ def predict_single_date(date, models_dict, historical_df=None):
             }
             
             # Features které API nevrací - dopočítáme z historických dat pokud jsou dostupná
-            # Pokud historická data nejsou dostupná, nastavíme value na np.nan (žádné tiché fallbacky)
+            # Pokud historická data nejsou dostupná, nastavíme value na np.nan 
             pred_month = date.month
             pred_day = date.day
 
@@ -164,66 +168,12 @@ def predict_single_date(date, models_dict, historical_df=None):
             else:
                 print(f"   ⚠️ Weather API vrátilo neúplná data (ponecháno NaN)")
         except Exception as e:
-            print(f"   ⚠️ Weather API error: {e}")
+            print(f"   ❌ Weather API error: {e}")
+            raise RuntimeError(f"Failed to get weather data for {pred_date}: {e}. Cannot make prediction without real weather data.")
     
-    # Pokud weather data nejsou dostupná se pokusíme získat co nejvíce z historických dat
-    if not weather_data:
-        print(f"   ℹ️  Weather data nedostupná - ponechávám hodnoty jako NaN pro explicitní ošetření")
-
-        pred_month = date.month
-        pred_day = date.day
-
-        df_historical = df[df['date'] < date].copy()
-        if len(df_historical) > 0:
-            df_historical['month'] = df_historical['date'].dt.month
-            df_historical['day'] = df_historical['date'].dt.day
-
-            similar_dates = df_historical[
-                ((df_historical['month'] == pred_month) & 
-                 (abs(df_historical['day'] - pred_day) <= 15)) |
-                ((pred_month == 1) & (df_historical['month'] == 12) & (df_historical['day'] >= 17)) |
-                ((pred_month == 12) & (df_historical['month'] == 1) & (df_historical['day'] <= 15))
-            ]
-
-            if len(similar_dates) < 10:
-                similar_dates = df_historical[df_historical['month'] == pred_month]
-            if len(similar_dates) < 5:
-                similar_dates = df_historical
-
-            # Použijeme mediány kde jsou k dispozici, jinak NaN
-            def median_or_nan(dfc, col):
-                return dfc[col].median() if col in dfc and len(dfc[col].dropna()) > 0 else np.nan
-
-            weather_data = {
-                'temperature_max': median_or_nan(similar_dates, 'temperature_max'),
-                'temperature_min': median_or_nan(similar_dates, 'temperature_min'),
-                'temperature_mean': median_or_nan(similar_dates, 'temperature_mean'),
-                'apparent_temp_max': median_or_nan(similar_dates, 'apparent_temp_max'),
-                'apparent_temp_min': median_or_nan(similar_dates, 'apparent_temp_min'),
-                'apparent_temp_mean': median_or_nan(similar_dates, 'apparent_temp_mean'),
-                'precipitation': median_or_nan(similar_dates, 'precipitation'),
-                'rain': median_or_nan(similar_dates, 'rain'),
-                'snowfall': median_or_nan(similar_dates, 'snowfall'),
-                'precipitation_hours': median_or_nan(similar_dates, 'precipitation_hours'),
-                'weather_code': (int(similar_dates['weather_code'].mode().iloc[0]) if 'weather_code' in similar_dates and len(similar_dates['weather_code'].mode()) > 0 else np.nan),
-                'wind_speed_max': median_or_nan(similar_dates, 'wind_speed_max'),
-                'wind_gusts_max': median_or_nan(similar_dates, 'wind_gusts_max'),
-                'wind_direction': median_or_nan(similar_dates, 'wind_direction'),
-                'sunshine_duration': median_or_nan(similar_dates, 'sunshine_duration'),
-                'daylight_duration': median_or_nan(similar_dates, 'daylight_duration'),
-                'is_rainy': (int(similar_dates['is_rainy'].mode().iloc[0]) if 'is_rainy' in similar_dates and len(similar_dates['is_rainy'].mode()) > 0 else np.nan),
-                'is_snowy': (int(similar_dates['is_snowy'].mode().iloc[0]) if 'is_snowy' in similar_dates and len(similar_dates['is_snowy'].mode()) > 0 else np.nan),
-                'is_windy': (int(similar_dates['is_windy'].mode().iloc[0]) if 'is_windy' in similar_dates and len(similar_dates['is_windy'].mode()) > 0 else np.nan),
-                'is_nice_weather': (int(similar_dates['is_nice_weather'].mode().iloc[0]) if 'is_nice_weather' in similar_dates and len(similar_dates['is_nice_weather'].mode()) > 0 else np.nan),
-                'sunshine_ratio': median_or_nan(similar_dates, 'sunshine_ratio'),
-            }
-            print(f"   📊 Použito {len(similar_dates)} podobných historických dnů (neexistující hodnoty jsou NaN)")
-        else:
-            # Pokud nejsou žádná historická data, necháme všechny hodnoty NaN
-            weather_cols = ['temperature_max','temperature_min','temperature_mean','apparent_temp_max','apparent_temp_min','apparent_temp_mean','precipitation','rain','snowfall','precipitation_hours','weather_code','wind_speed_max','wind_gusts_max','wind_direction','sunshine_duration','daylight_duration','is_rainy','is_snowy','is_windy','is_nice_weather','sunshine_ratio']
-            weather_data = {c: np.nan for c in weather_cols}
-            print(f"   ⚠️  Žádná historická data - všechny weather hodnoty jsou NaN")
-
+    # Ověřit, že máme základní weather data
+    if not weather_data or 'temperature_mean' not in weather_data:
+        raise RuntimeError(f"Weather data not available for {pred_date}. Cannot make prediction without real weather data.")
     
     new_row = pd.DataFrame({
         'date': [date],
@@ -268,7 +218,6 @@ def predict_single_date(date, models_dict, historical_df=None):
                 X_pred[col] = X_pred[col].fillna(historical_median)
     
     if missing_features:
-        # Namísto nahrazení 0, vyhodíme chybu aby uživatel poskytl historická data nebo upravil feature engineering
         raise ValueError(f"Chybějící nezbytné feature sloupce pro predikci (bez fallbacku): {', '.join(missing_features)}")
     
     # === Predikce z každého modelu ===
@@ -322,10 +271,10 @@ def predict_single_date(date, models_dict, historical_df=None):
         },
         'weather': {
             'description': weather_description or 'N/A',
-            'temperature': weather_data.get('temperature_mean', 10.0),
-            'precipitation': weather_data.get('precipitation', 0.0),
-            'rain': weather_data.get('rain', 0.0),
-            'snowfall': weather_data.get('snowfall', 0.0),
+            'temperature': weather_data['temperature_mean'],
+            'precipitation': weather_data['precipitation'],
+            'rain': weather_data.get('rain', weather_data['precipitation']),
+            'snowfall': weather_data.get('snowfall', 0.0) if 'snowfall' in weather_data else 0.0,
         }
     }
     
@@ -344,7 +293,10 @@ def predict_date_range(start_date, end_date, models_dict):
     Returns:
         DataFrame s predikcemi
     """
-    # Načíst historická data S POČASÍM (stejně jako v predict_single_date)
+    if not SERVICES_AVAILABLE:
+        raise RuntimeError("Weather services not available. Cannot make predictions without real weather data.")
+    
+    # Načíst historická data S POČASÍM
     script_dir = Path(__file__).parent
     data_path = script_dir.parent / 'data' / 'processed' / 'techmania_with_weather.csv'
     
@@ -352,9 +304,8 @@ def predict_date_range(start_date, end_date, models_dict):
         print("⚠️ techmania_with_weather.csv nenalezen, použiji data bez počasí")
         data_path = script_dir.parent / 'data' / 'raw' / 'techmania_cleaned_master.csv'
     
-    df = pd.read_csv(data_path)
-    df['date'] = pd.to_datetime(df['date'])
-
+    df_historical = pd.read_csv(data_path)
+    df_historical['date'] = pd.to_datetime(df_historical['date'])
     
     # Vytvořit rozsah dat
     if isinstance(start_date, str):
@@ -365,23 +316,162 @@ def predict_date_range(start_date, end_date, models_dict):
     date_range = pd.date_range(start=start_date, end=end_date, freq='D')
     
     print(f"\n🔮 Predicting {len(date_range)} days...")
+    print(f"📥 Downloading weather data for {len(date_range)} days...")
     
-    results = []
+    # Stáhnout weather data pro všechny dny
+    new_rows = []
     for date in date_range:
         try:
-            pred = predict_single_date(date, models_dict, df)
-            results.append({
-                'date': pred['date'],
-                'day_of_week': pred['day_of_week'],
-                'prediction': pred['ensemble_prediction'],
-                'lower_bound': pred['confidence_interval'][0],
-                'upper_bound': pred['confidence_interval'][1],
-                'lightgbm': pred['individual_predictions']['lightgbm'],
-                'xgboost': pred['individual_predictions']['xgboost'],
-                'catboost': pred['individual_predictions']['catboost']
-            })
+            pred_date = date.date() if isinstance(date, pd.Timestamp) else date
+            weather_info = weather_service.get_weather(pred_date)
+            
+            # Základní weather data z API
+            weather_data = {
+                'date': date,
+                'total_visitors': np.nan,
+                'school_visitors': np.nan,
+                'public_visitors': np.nan,
+                'extra': None,
+                'opening_hours': None,
+                'temperature_max': weather_info['temperature_max'],
+                'temperature_min': weather_info['temperature_min'],
+                'temperature_mean': weather_info['temperature_mean'],
+                'precipitation': weather_info['precipitation'],
+                'rain': weather_info.get('rain'),
+                'snowfall': weather_info.get('snowfall'),
+                'precipitation_hours': weather_info.get('precipitation_hours'),
+                'weather_code': weather_info.get('weather_code'),
+                'wind_speed_max': weather_info.get('wind_speed_max'),
+                'wind_gusts_max': weather_info.get('wind_gusts_max'),
+                'is_rainy': int(weather_info.get('is_rainy', False)),
+                'is_snowy': int(weather_info.get('is_snowy', False)),
+                'is_windy': int(weather_info.get('is_windy', False)),
+                'is_nice_weather': int(weather_info.get('is_nice_weather', False)),
+            }
+            
+            # Features z historických dat
+            pred_month = date.month
+            pred_day = date.day
+            
+            df_hist = df_historical[df_historical['date'] < date].copy()
+            if len(df_hist) > 0:
+                df_hist['month'] = df_hist['date'].dt.month
+                df_hist['day'] = df_hist['date'].dt.day
+                
+                # Najít podobné dny
+                similar = df_hist[
+                    ((df_hist['month'] == pred_month) & 
+                     (abs(df_hist['day'] - pred_day) <= 15)) |
+                    ((pred_month == 1) & (df_hist['month'] == 12) & (df_hist['day'] >= 17)) |
+                    ((pred_month == 12) & (df_hist['month'] == 1) & (df_hist['day'] <= 15))
+                ]
+                
+                if len(similar) < 10:
+                    similar = df_hist[df_hist['month'] == pred_month]
+                if len(similar) < 5:
+                    similar = df_hist
+                
+                weather_data['apparent_temp_max'] = similar['apparent_temp_max'].median() if 'apparent_temp_max' in similar and len(similar) > 0 else np.nan
+                weather_data['apparent_temp_min'] = similar['apparent_temp_min'].median() if 'apparent_temp_min' in similar and len(similar) > 0 else np.nan
+                weather_data['apparent_temp_mean'] = similar['apparent_temp_mean'].median() if 'apparent_temp_mean' in similar and len(similar) > 0 else np.nan
+                weather_data['wind_direction'] = similar['wind_direction'].median() if 'wind_direction' in similar and len(similar) > 0 else np.nan
+                weather_data['sunshine_duration'] = similar['sunshine_duration'].median() if 'sunshine_duration' in similar and len(similar) > 0 else np.nan
+                weather_data['daylight_duration'] = similar['daylight_duration'].median() if 'daylight_duration' in similar and len(similar) > 0 else np.nan
+                weather_data['sunshine_ratio'] = similar['sunshine_ratio'].median() if 'sunshine_ratio' in similar and len(similar) > 0 else np.nan
+            else:
+                weather_data['apparent_temp_max'] = np.nan
+                weather_data['apparent_temp_min'] = np.nan
+                weather_data['apparent_temp_mean'] = np.nan
+                weather_data['wind_direction'] = np.nan
+                weather_data['sunshine_duration'] = np.nan
+                weather_data['daylight_duration'] = np.nan
+                weather_data['sunshine_ratio'] = np.nan
+            
+            new_rows.append(weather_data)
+            
         except Exception as e:
-            print(f"  ⚠️ Error predicting {date}: {e}")
+            print(f"  ⚠️ Error getting weather for {date.strftime('%Y-%m-%d')}: {e}")
+            raise RuntimeError(f"Failed to get weather data for {date.strftime('%Y-%m-%d')}: {e}")
+    
+    # Vytvořit DataFrame s novými daty
+    df_new = pd.DataFrame(new_rows)
+    
+    # Spojit historická data s novými daty
+    df_combined = pd.concat([df_historical, df_new], ignore_index=True)
+    df_combined = df_combined.sort_values('date').reset_index(drop=True)
+    
+    print(f"✅ Weather data downloaded for {len(df_new)} days")
+    
+    # Feature engineering na celý dataset
+    df_combined = create_features(df_combined)
+    
+    # Vybrat jen řádky pro predikci
+    df_pred = df_combined[df_combined['date'].isin(date_range)].copy()
+    
+    # Připravit features
+    feature_cols = models_dict['feature_cols']
+    available_features = [col for col in feature_cols if col in df_pred.columns]
+    
+    # Doplnit chybějící features mediánem z historických dat
+    X_pred = df_pred[available_features].copy()
+    for col in available_features:
+        if X_pred[col].isna().any():
+            historical_median = df_combined[df_combined['date'] < start_date][col].median()
+            if pd.isna(historical_median):
+                historical_median = df_combined[col].median()
+            if not pd.isna(historical_median):
+                X_pred[col] = X_pred[col].fillna(historical_median)
+    
+    # Kontrola chybějících hodnot
+    missing_cols = X_pred.columns[X_pred.isna().any()].tolist()
+    if missing_cols:
+        print(f"  ⚠️ Warning: Chybějící hodnoty v sloupcích: {missing_cols}")
+        # Doplnit 0 jako poslední možnost
+        X_pred = X_pred.fillna(0)
+    
+    # === Predikce z každého modelu ===
+    print(f"🤖 Running predictions...")
+    
+    # LightGBM
+    lgb_model = models_dict['lgb']
+    try:
+        lgb_preds = lgb_model.predict(X_pred, num_iteration=lgb_model.best_iteration)
+    except:
+        lgb_preds = lgb_model.predict(X_pred)
+    
+    # XGBoost
+    xgb_model = models_dict['xgb']
+    dmatrix = xgb.DMatrix(X_pred)
+    xgb_preds = xgb_model.predict(dmatrix)
+    
+    # CatBoost
+    cat_model = models_dict['cat']
+    cat_preds = cat_model.predict(X_pred)
+    
+    # === Ensemble ===
+    weights = models_dict['weights']
+    ensemble_preds = (
+        weights[0] * lgb_preds +
+        weights[1] * xgb_preds +
+        weights[2] * cat_preds
+    )
+    
+    # Sestavit výsledky
+    results = []
+    for i, date in enumerate(df_pred['date']):
+        model_std = np.std([lgb_preds[i], xgb_preds[i], cat_preds[i]])
+        ensemble_pred = int(round(max(ensemble_preds[i], 0)))
+        
+        results.append({
+            'date': date,
+            'day_of_week': date.strftime('%A'),
+            'prediction': ensemble_pred,
+            'lower_bound': int(max(0, ensemble_pred - 1.96 * model_std)),
+            'upper_bound': int(ensemble_pred + 1.96 * model_std),
+            'lightgbm': int(round(lgb_preds[i])),
+            'xgboost': int(round(xgb_preds[i])),
+            'catboost': int(round(cat_preds[i]))
+        })
     
     results_df = pd.DataFrame(results)
     print(f"✅ Predicted {len(results_df)} days successfully!")

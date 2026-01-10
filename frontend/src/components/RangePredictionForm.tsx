@@ -26,8 +26,9 @@ export default function RangePredictionForm() {
         end_date: endDate,
       });
       setResult(prediction);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Chyba při načítání predikce');
+    } catch (err: any) {
+      const errorMessage = err.response?.data?.detail || err.message || 'Chyba při načítání predikce';
+      setError(errorMessage);
     } finally {
       setLoading(false);
     }
@@ -104,6 +105,9 @@ export default function RangePredictionForm() {
                     <p className="text-sm text-gray-600 mt-1">
                       Pro období {result.predictions.length} dní
                     </p>
+                    <p className="text-sm text-gray-600">
+                      Průměrně {Math.round(result.average_daily).toLocaleString('cs-CZ')} návštěvníků / den
+                    </p>
                   </div>
                   <ExportButton 
                     data={result.predictions} 
@@ -120,18 +124,76 @@ export default function RangePredictionForm() {
                         Datum
                       </th>
                       <th className="px-3 py-3.5 text-left text-sm font-semibold text-gray-900">
-                        Predikovaný počet návštěvníků
+                        Den
+                      </th>
+                      <th className="px-3 py-3.5 text-left text-sm font-semibold text-gray-900">
+                        Návštěvníci
+                      </th>
+                      <th className="px-3 py-3.5 text-left text-sm font-semibold text-gray-900">
+                        Interval
+                      </th>
+                      <th className="px-3 py-3.5 text-left text-sm font-semibold text-gray-900">
+                        Počasí
+                      </th>
+                      <th className="px-3 py-3.5 text-left text-sm font-semibold text-gray-900">
+                        Svátek
                       </th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-200 bg-white">
                     {result.predictions.map((prediction, idx) => (
-                      <tr key={idx}>
+                      <tr key={idx} className={prediction.is_weekend ? 'bg-blue-50' : ''}>
                         <td className="whitespace-nowrap py-4 pl-4 pr-3 text-sm font-medium text-gray-900 sm:pl-6">
-                          {format(new Date(prediction.date), 'PPP', { locale: cs })}
+                          {format(new Date(prediction.date), 'dd.MM.yyyy', { locale: cs })}
                         </td>
-                        <td className="whitespace-nowrap px-3 py-4 text-sm text-gray-900 font-semibold">
+                        <td className="whitespace-nowrap px-3 py-4 text-sm text-gray-700">
+                          <div className="flex items-center gap-2">
+                            {prediction.day_of_week}
+                            {prediction.is_weekend && (
+                              <span className="inline-flex items-center rounded-full bg-blue-100 px-2 py-0.5 text-xs font-medium text-blue-800">
+                                Víkend
+                              </span>
+                            )}
+                          </div>
+                        </td>
+                        <td className="whitespace-nowrap px-3 py-4 text-sm font-bold text-gray-900">
                           {Math.round(prediction.predicted_visitors).toLocaleString('cs-CZ')}
+                        </td>
+                        <td className="whitespace-nowrap px-3 py-4 text-xs text-gray-500">
+                          {Math.round(prediction.confidence_interval.lower).toLocaleString('cs-CZ')} - {Math.round(prediction.confidence_interval.upper).toLocaleString('cs-CZ')}
+                        </td>
+                        <td className="px-3 py-4 text-sm text-gray-700">
+                          <div className="flex flex-col gap-1">
+                            <div className="flex items-center gap-2">
+                              <span className="font-medium">{prediction.weather_info.temperature_mean.toFixed(1)}°C</span>
+                              {prediction.weather_info.is_nice_weather && <span>☀️</span>}
+                            </div>
+                            <div className="text-xs text-gray-500">
+                              {prediction.weather_info.precipitation > 0 && (
+                                <span>🌧️ {prediction.weather_info.precipitation.toFixed(1)}mm</span>
+                              )}
+                              {prediction.weather_info.precipitation === 0 && <span>Bez srážek</span>}
+                            </div>
+                            <div className="text-xs text-gray-400">
+                              {prediction.weather_info.weather_description}
+                            </div>
+                          </div>
+                        </td>
+                        <td className="px-3 py-4 text-sm">
+                          {prediction.holiday_info.is_holiday ? (
+                            <div className="flex flex-col gap-1">
+                              <span className="inline-flex items-center rounded-full bg-amber-100 px-2 py-1 text-xs font-medium text-amber-800">
+                                📅 Svátek
+                              </span>
+                              {prediction.holiday_info.holiday_name && (
+                                <span className="text-xs text-gray-600">
+                                  {prediction.holiday_info.holiday_name}
+                                </span>
+                              )}
+                            </div>
+                          ) : (
+                            <span className="text-xs text-gray-400">—</span>
+                          )}
                         </td>
                       </tr>
                     ))}

@@ -37,31 +37,29 @@ def create_features(df: pd.DataFrame) -> pd.DataFrame:
     # Víkend
     df['is_weekend'] = (df['day_of_week'] >= 5).astype(int)
     
-    # === LAG FEATURES (historické hodnoty) ===
-    print("  ✓ Lag features (1, 7, 14, 30 dní zpět)")
-    for lag in [1, 7, 14, 30]:
-        # Shift vytvoří NaN pro prvních 'lag' řádků
-        # NaN hodnoty zůstanou - budou ošetřeny při splitu dat
-        df[f'visitors_lag_{lag}'] = df['total_visitors'].shift(lag)
+    # === LAG FEATURES (historické hodnoty) - VYPNUTO PRO LEPŠÍ POČASÍ ===
+    # Tyto features způsobují, že model ignoruje počasí, protože se spoléhá na historii
+    # Při predikci do budoucna nejsou dostupné, takže se nahrazují mediánem
+    # print("  ✓ Lag features (1, 7, 14, 30 dní zpět)")
+    # for lag in [1, 7, 14, 30]:
+    #     df[f'visitors_lag_{lag}'] = df['total_visitors'].shift(lag)
     
-    # === ROLLING STATISTICS ===
-    print("  ✓ Rolling statistics (mean, std, min, max)")
-    for window in [7, 14, 30]:
-        # min_periods nastavíme na window/2 aby byla statistika validní
-        # NaN hodnoty zůstanou pro řádky bez dostatečné historie
-        min_periods = max(1, window // 2)
-        df[f'visitors_rolling_mean_{window}'] = (
-            df['total_visitors'].rolling(window=window, min_periods=min_periods).mean()
-        )
-        df[f'visitors_rolling_std_{window}'] = (
-            df['total_visitors'].rolling(window=window, min_periods=min_periods).std()
-        )
-        df[f'visitors_rolling_min_{window}'] = (
-            df['total_visitors'].rolling(window=window, min_periods=min_periods).min()
-        )
-        df[f'visitors_rolling_max_{window}'] = (
-            df['total_visitors'].rolling(window=window, min_periods=min_periods).max()
-        )
+    # === ROLLING STATISTICS - VYPNUTO PRO LEPŠÍ POČASÍ ===
+    # print("  ✓ Rolling statistics (mean, std, min, max)")
+    # for window in [7, 14, 30]:
+    #     min_periods = max(1, window // 2)
+    #     df[f'visitors_rolling_mean_{window}'] = (
+    #         df['total_visitors'].rolling(window=window, min_periods=min_periods).mean()
+    #     )
+    #     df[f'visitors_rolling_std_{window}'] = (
+    #         df['total_visitors'].rolling(window=window, min_periods=min_periods).std()
+    #     )
+    #     df[f'visitors_rolling_min_{window}'] = (
+    #         df['total_visitors'].rolling(window=window, min_periods=min_periods).min()
+    #     )
+    #     df[f'visitors_rolling_max_{window}'] = (
+    #         df['total_visitors'].rolling(window=window, min_periods=min_periods).max()
+    #     )
     
     # === SEZÓNNÍ FEATURES ===
     print("  ✓ Sezónní features (prázdniny, školní rok)")
@@ -86,10 +84,11 @@ def create_features(df: pd.DataFrame) -> pd.DataFrame:
     
     # === DERIVED FEATURES ===
     print("  ✓ Odvozené features")
-    # Poměr školní/veřejní návštěvníci (pokud existují)
-    if 'school_visitors' in df.columns and 'public_visitors' in df.columns:
-        df['school_ratio'] = df['school_visitors'] / (df['total_visitors'] + 1)
-        df['public_ratio'] = df['public_visitors'] / (df['total_visitors'] + 1)
+    # VYPNUTO: Poměr školní/veřejní návštěvníci - spoléhá na historická data
+    # Tyto features nejsou dostupné při predikci do budoucna
+    # if 'school_visitors' in df.columns and 'public_visitors' in df.columns:
+    #     df['school_ratio'] = df['school_visitors'] / (df['total_visitors'] + 1)
+    #     df['public_ratio'] = df['public_visitors'] / (df['total_visitors'] + 1)
     
     # Otevírací doba v hodinách
     if 'opening_hours' in df.columns:
@@ -119,6 +118,86 @@ def create_features(df: pd.DataFrame) -> pd.DataFrame:
     weather_present = [col for col in weather_cols if col in df.columns]
     if weather_present:
         print(f"  ✓ Weather features ({len(weather_present)} sloupců): {', '.join(weather_present[:5])}...")
+        
+        # === INTERAKCE POČASÍ × ČAS (klíčové pro predikci!) ===
+        print("  ✓ Weather interactions (počasí × víkend, měsíc, atd.)")
+        
+        # Teplota × Víkend (v zimě víkend + špatné počasí = méně lidí)
+        if 'temperature_mean' in df.columns:
+            df['temp_x_weekend'] = df['temperature_mean'] * df['is_weekend']
+            df['temp_x_summer'] = df['temperature_mean'] * df['is_summer_holiday']
+            df['temp_x_month'] = df['temperature_mean'] * df['month']
+            
+            # Exponenciální penalizace pro nízké teploty (pod 0°C je mnohem horší)
+            # Čím nižší teplota, tím silnější negativní efekt
+            df['cold_penalty'] = np.where(
+                df['temperature_mean'] < 0,
+                -(df['temperature_mean'] ** 2) / 10,  # Kvadratická penalizace pro mráz
+                0
+            )
+            
+            # Mráz speciálně o víkendu (kdy by normálně bylo nejvíc lidí)
+            df['weekend_cold_penalty'] = df['is_weekend'] * df['cold_penalty']
+        
+        # Srážky × Víkend (déšť o víkendu je horší než v týdnu)
+        if 'precipitation' in df.columns:
+            df['precip_x_weekend'] = df['precipitation'] * df['is_weekend']
+            df['precip_x_summer'] = df['precipitation'] * df['is_summer_holiday']
+        
+        # Sníh × Víkend
+        if 'snowfall' in df.columns:
+            df['snow_x_weekend'] = df['snowfall'] * df['is_weekend']
+        
+        # Špatné počasí indikátory (kombinace faktorů)
+        if 'temperature_mean' in df.columns and 'precipitation' in df.columns:
+            # EXTRÉMNĚ silné penalizace pro zimní podmínky
+            df['is_freezing'] = (df['temperature_mean'] < 0).astype(int)
+            df['is_very_cold'] = (df['temperature_mean'] < -5).astype(int)
+            df['is_extreme_cold'] = (df['temperature_mean'] < -10).astype(int)
+            
+            # Kombinace mrazu a srážek/sněhu = katastrofa pro návštěvnost
+            df['freezing_with_snow'] = (
+                (df['temperature_mean'] < 0).astype(int) * 
+                (df['is_snowy'] | (df['snowfall'] > 0)).astype(int)
+            )
+            
+            df['freezing_with_precip'] = (
+                (df['temperature_mean'] < 0).astype(int) * 
+                (df['precipitation'] > 0).astype(int)
+            )
+            
+            # Opravdu špatné počasí = zima + srážky (SILNĚJŠÍ penalizace)
+            df['bad_weather_score'] = (
+                (df['temperature_mean'] < 0).astype(int) * 5 +    # Mráz = 5 bodů! 
+                (df['temperature_mean'] < -5).astype(int) * 3 +   # Pod -5°C = +3 body
+                (df['temperature_mean'] < -10).astype(int) * 3 +  # Pod -10°C = +3 body
+                (df['precipitation'] > 5).astype(int) * 3 +       # Hodně srážek = 3 body
+                (df['precipitation'] > 0).astype(int) +           # Jakékoli srážky = 1 bod
+                df['is_snowy'] * 5 +                              # Sníh = 5 bodů (VELMI špatné)
+                (df['snowfall'] > 0).astype(int) * 3 +            # Sněžení = 3 body
+                df['is_windy'] * 2                                # Vítr = 2 body
+            )
+            
+            # Mráz + sníh + víkend = EXTRÉMNÍ penalizace
+            df['weekend_frozen_nightmare'] = (
+                df['is_weekend'] * 
+                (df['temperature_mean'] < 0).astype(int) * 
+                df['is_snowy']
+            )
+            
+            # Perfektní počasí pro návštěvu = teplo + sucho + víkend
+            df['perfect_weather_score'] = (
+                (df['temperature_mean'] > 15).astype(int) * 2 +  # Teplo = 2 body
+                (df['temperature_mean'] > 20).astype(int) +       # Ještě tepleji = +1 bod
+                (df['precipitation'] == 0).astype(int) * 2 +      # Sucho = 2 body
+                df['is_nice_weather'] * 2 +                       # Hezké počasí = 2 body
+                df['is_weekend']                                   # Víkend = 1 bod
+            )
+        
+        # Tepelný komfort (ne moc horko, ne moc zima)
+        if 'temperature_mean' in df.columns:
+            df['temp_comfort'] = np.exp(-((df['temperature_mean'] - 18) ** 2) / 100)
+        
     else:
         print("  ⚠️ Weather features nejsou v datech - byly přeskočeny")
     

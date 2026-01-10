@@ -4,7 +4,6 @@ import Sidebar from '@/components/Sidebar';
 import Header from '@/components/Header';
 import StatsCards from '@/components/StatsCards';
 import VisitorChart from '@/components/VisitorChart';
-import PredictionForm from '@/components/PredictionForm';
 import RangePredictionForm from '@/components/RangePredictionForm';
 
 export default function Home() {
@@ -41,10 +40,7 @@ export default function Home() {
               <h2 className="text-2xl font-bold text-gray-900 mb-6">
                 Predikce návštěvnosti
               </h2>
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-                <PredictionForm />
-                <RangePredictionForm />
-              </div>
+              <RangePredictionForm />
             </div>
           </div>
 
@@ -66,7 +62,7 @@ export default function Home() {
                     </label>
                     <input
                       type="text"
-                      defaultValue="http://localhost:5000"
+                      defaultValue="http://localhost:8000"
                       disabled
                       className="mt-1 block w-full rounded-md border-gray-300 bg-gray-50 shadow-sm sm:text-sm px-3 py-2"
                     />
@@ -86,9 +82,9 @@ export default function Home() {
                         <div className="mt-2 text-sm text-blue-700">
                           <p>Používá se ensemble model kombinující:</p>
                           <ul className="list-disc list-inside mt-1 space-y-1">
-                            <li>Random Forest</li>
-                            <li>Gradient Boosting</li>
+                            <li>LightGBM</li>
                             <li>XGBoost</li>
+                            <li>CatBoost</li>
                           </ul>
                         </div>
                       </div>

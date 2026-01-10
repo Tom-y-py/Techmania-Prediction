@@ -16,7 +16,7 @@ from pathlib import Path
 # Přidat src do path
 sys.path.append(str(Path(__file__).parent.parent / 'src'))
 
-from feature_engineering import create_all_features
+from feature_engineering import create_features
 from services import holiday_service, weather_service
 
 # Inicializace FastAPI
@@ -39,6 +39,7 @@ app.add_middleware(
 models = {}
 feature_columns = None
 ensemble_weights = None
+historical_data = None  # Pro ukládání historických dat
 
 # Pydantic modely pro request/response
 class PredictionRequest(BaseModel):
@@ -71,6 +72,11 @@ class RangePredictionRequest(BaseModel):
 class DayPrediction(BaseModel):
     date: str
     predicted_visitors: int
+    confidence_interval: Dict[str, int]
+    holiday_info: HolidayInfo
+    weather_info: WeatherInfo
+    day_of_week: str
+    is_weekend: bool
 
 class RangePredictionResponse(BaseModel):
     predictions: List[DayPrediction]
@@ -83,13 +89,33 @@ class HealthResponse(BaseModel):
     models_loaded: Dict[str, bool]
     features_count: Optional[int]
 
+class StatsResponse(BaseModel):
+    total_visitors: int
+    avg_daily_visitors: float
+    peak_day: str
+    peak_visitors: int
+    trend: float
+    data_start_date: str
+    data_end_date: str
+
+class HistoricalDataPoint(BaseModel):
+    date: str
+    visitors: int
+
+class HistoricalDataResponse(BaseModel):
+    data: List[HistoricalDataPoint]
+    start_date: str
+    end_date: str
+    total_days: int
+
 # Načtení modelů při startu
 @app.on_event("startup")
 async def load_models():
-    """Načte všechny natrénované modely."""
-    global models, feature_columns, ensemble_weights
+    """Načte všechny natrénované modely a historická data."""
+    global models, feature_columns, ensemble_weights, historical_data
     
     models_dir = Path(__file__).parent.parent / 'models'
+    data_dir = Path(__file__).parent.parent / 'data' / 'raw'
     
     try:
         # Načtení jednotlivých modelů
@@ -102,6 +128,15 @@ async def load_models():
         
         # Načtení seznamu features
         feature_columns = joblib.load(models_dir / 'feature_columns.pkl')
+        
+        # Načtení historických dat pro statistiky
+        try:
+            historical_data = pd.read_csv(data_dir / 'techmania_cleaned_master.csv')
+            historical_data['date'] = pd.to_datetime(historical_data['date'])
+            print(f"   - Historická data: {len(historical_data)} záznamů")
+        except Exception as e:
+            print(f"   ⚠️ Historická data nenačtena: {e}")
+            historical_data = None
         
         print("✅ Všechny modely úspěšně načteny")
         print(f"   - LightGBM: načten")
@@ -175,6 +210,74 @@ async def models_info():
         "feature_sample": feature_columns[:10] if feature_columns else []
     }
 
+@app.get("/stats", response_model=StatsResponse, tags=["Statistics"])
+async def get_statistics():
+    """
+    Získá statistiky z historických dat.
+    """
+    if historical_data is None:
+        raise HTTPException(status_code=503, detail="Historická data nejsou dostupná")
+    
+    try:
+        # Výpočet statistik
+        total_visitors = int(historical_data['total_visitors'].sum())
+        avg_daily = float(historical_data['total_visitors'].mean())
+        
+        # Najít den s nejvyšší návštěvností
+        peak_idx = historical_data['total_visitors'].idxmax()
+        peak_day = historical_data.loc[peak_idx, 'date'].strftime('%d. %B %Y')
+        peak_visitors = int(historical_data.loc[peak_idx, 'total_visitors'])
+        
+        # Vypočítat trend (poslední měsíc vs předchozí měsíc)
+        last_month = historical_data.tail(30)
+        prev_month = historical_data.iloc[-60:-30] if len(historical_data) >= 60 else historical_data.head(30)
+        
+        if len(prev_month) > 0:
+            trend = ((last_month['total_visitors'].mean() - prev_month['total_visitors'].mean()) / 
+                    prev_month['total_visitors'].mean() * 100)
+        else:
+            trend = 0.0
+        
+        return {
+            "total_visitors": total_visitors,
+            "avg_daily_visitors": avg_daily,
+            "peak_day": peak_day,
+            "peak_visitors": peak_visitors,
+            "trend": round(trend, 1),
+            "data_start_date": historical_data['date'].min().strftime('%Y-%m-%d'),
+            "data_end_date": historical_data['date'].max().strftime('%Y-%m-%d')
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Chyba při výpočtu statistik: {str(e)}")
+
+@app.get("/historical", response_model=HistoricalDataResponse, tags=["Statistics"])
+async def get_historical_data(days: int = 30):
+    """
+    Získá historická data za poslední N dní.
+    """
+    if historical_data is None:
+        raise HTTPException(status_code=503, detail="Historická data nejsou dostupná")
+    
+    try:
+        # Získat poslední N dní
+        recent_data = historical_data.tail(days).copy()
+        
+        data_points = []
+        for _, row in recent_data.iterrows():
+            data_points.append({
+                "date": row['date'].strftime('%Y-%m-%d'),
+                "visitors": int(row['total_visitors'])
+            })
+        
+        return {
+            "data": data_points,
+            "start_date": recent_data['date'].min().strftime('%Y-%m-%d'),
+            "end_date": recent_data['date'].max().strftime('%Y-%m-%d'),
+            "total_days": len(data_points)
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Chyba při načítání dat: {str(e)}")
+
 @app.post("/predict", response_model=PredictionResponse, tags=["Predictions"])
 async def predict(request: PredictionRequest):
     """
@@ -202,23 +305,40 @@ async def predict(request: PredictionRequest):
         # Získat informace o počasí
         weather_data = weather_service.get_weather(pred_date)
         
+        # Zkontrolovat, že máme všechna potřebná data o počasí
+        required_weather_fields = ['temperature_max', 'temperature_min', 'temperature_mean', 'precipitation']
+        missing_fields = [field for field in required_weather_fields if field not in weather_data or weather_data[field] is None]
+        
+        if missing_fields:
+            raise HTTPException(
+                status_code=503,
+                detail=f"Weather data incomplete: missing fields {missing_fields}. Cannot make prediction without real weather data."
+            )
+        
         # Vytvoření DataFrame pro predikci
         df_pred = pd.DataFrame({
             'date': [pd.to_datetime(pred_date)],
+            'total_visitors': [0],  # Potřebné pro create_features (bude ignorováno při predikci)
             'is_holiday': [is_holiday],
             'opening_hours': [request.opening_hours],
-            # Přidat počasí do features
-            'temperature_max': [weather_data.get('temperature_max', 15.0)],
-            'temperature_min': [weather_data.get('temperature_min', 5.0)],
-            'temperature_mean': [weather_data.get('temperature_mean', 10.0)],
-            'precipitation': [weather_data.get('precipitation', 2.0)],
-            'is_rainy': [weather_data.get('is_rainy', False)],
+            'temperature_max': [weather_data['temperature_max']],
+            'temperature_min': [weather_data['temperature_min']],
+            'temperature_mean': [weather_data['temperature_mean']],
+            'precipitation': [weather_data['precipitation']],
+            'is_rainy': [weather_data.get('is_rainy', weather_data['precipitation'] > 1.0)],
             'is_snowy': [weather_data.get('is_snowy', False)],
             'is_nice_weather': [weather_data.get('is_nice_weather', False)],
         })
         
         # Vytvoření features
-        df_pred = create_all_features(df_pred)
+        df_pred = create_features(df_pred)
+        
+        # Odstranit lag a rolling features (budou NaN pro single prediction)
+        # Nahradit NaN hodnotami střední hodnotou nebo 0
+        df_pred = df_pred.fillna(0)
+        
+        # Vybrat pouze features, které model očekává
+        df_pred = df_pred[feature_columns]
         
         # Ensemble predikce
         prediction = make_ensemble_prediction(df_pred)[0]
@@ -243,9 +363,9 @@ async def predict(request: PredictionRequest):
                 "holiday_name": holiday_name
             },
             "weather_info": {
-                "temperature_mean": float(weather_data.get('temperature_mean', 10.0)),
-                "precipitation": float(weather_data.get('precipitation', 2.0)),
-                "weather_description": weather_data.get('weather_description', 'Neznámé'),
+                "temperature_mean": float(weather_data['temperature_mean']),
+                "precipitation": float(weather_data['precipitation']),
+                "weather_description": weather_data.get('weather_description', 'N/A'),
                 "is_nice_weather": bool(weather_data.get('is_nice_weather', False))
             }
         }
@@ -259,53 +379,91 @@ async def predict_range(request: RangePredictionRequest):
     Predikce návštěvnosti pro časové období.
     
     Vytvoří predikce pro každý den v zadaném období.
+    Automaticky stahuje weather data pro každý den z Open-Meteo API.
     """
     if not models:
         raise HTTPException(status_code=503, detail="Modely nejsou načteny")
     
     try:
+        from predict import predict_date_range
+        
         start_date = pd.to_datetime(request.start_date)
         end_date = pd.to_datetime(request.end_date)
         
         if start_date > end_date:
             raise HTTPException(status_code=400, detail="start_date musí být před end_date")
         
-        # Vytvoření date range
-        date_range = pd.date_range(start=start_date, end=end_date, freq='D')
+        # Použít funkci z predict.py která automaticky stahuje weather data
+        models_dict = {
+            'lgb': models['lightgbm'],
+            'xgb': models['xgboost'],
+            'cat': models['catboost'],
+            'weights': ensemble_weights,
+            'feature_cols': feature_columns
+        }
         
-        # Vytvoření DataFrame pro všechna data
-        df_pred = pd.DataFrame({
-            'date': date_range,
-            'is_holiday': False,  # Můžeme později rozšířit o automatickou detekci
-            'opening_hours': '9-17'
-        })
+        results_df = predict_date_range(start_date, end_date, models_dict)
         
-        # Vytvoření features
-        df_pred = create_all_features(df_pred)
-        
-        # Ensemble predikce
-        predictions_array = make_ensemble_prediction(df_pred)
-        
-        # Formátování výstupu
+        # Formátování výstupu s detailními informacemi
         predictions = []
-        for i, pred_date in enumerate(date_range):
+        for _, row in results_df.iterrows():
+            pred_date = row['date'].date()
+            prediction_value = int(row['prediction'])
+            
+            # Získat informace o svátku
+            holiday_info_data = holiday_service.get_holiday_info(pred_date)
+            
+            # Získat informace o počasí
+            weather_data = weather_service.get_weather(pred_date)
+            
+            # Den v týdnu
+            day_name = row['date'].strftime('%A')
+            day_name_cs = {
+                'Monday': 'Pondělí',
+                'Tuesday': 'Úterý',
+                'Wednesday': 'Středa',
+                'Thursday': 'Čtvrtek',
+                'Friday': 'Pátek',
+                'Saturday': 'Sobota',
+                'Sunday': 'Neděle'
+            }.get(day_name, day_name)
+            
             predictions.append({
-                "date": pred_date.strftime('%Y-%m-%d'),
-                "predicted_visitors": int(np.round(predictions_array[i]))
+                "date": row['date'].strftime('%Y-%m-%d'),
+                "predicted_visitors": prediction_value,
+                "confidence_interval": {
+                    "lower": int(prediction_value * 0.85),
+                    "upper": int(prediction_value * 1.15)
+                },
+                "holiday_info": {
+                    "is_holiday": holiday_info_data['is_holiday'],
+                    "holiday_name": holiday_info_data['holiday_name']
+                },
+                "weather_info": {
+                    "temperature_mean": float(weather_data['temperature_mean']),
+                    "precipitation": float(weather_data['precipitation']),
+                    "weather_description": weather_data.get('weather_description', 'N/A'),
+                    "is_nice_weather": bool(weather_data.get('is_nice_weather', False))
+                },
+                "day_of_week": day_name_cs,
+                "is_weekend": row['date'].dayofweek >= 5
             })
         
-        total = int(np.sum(predictions_array))
+        total = int(results_df['prediction'].sum())
         
         return {
             "predictions": predictions,
             "total_predicted": total,
-            "average_daily": float(np.mean(predictions_array)),
-            "period_days": len(date_range)
+            "average_daily": float(results_df['prediction'].mean()),
+            "period_days": len(results_df)
         }
         
     except HTTPException:
         raise
     except Exception as e:
+        import traceback
+        print(f"❌ Error in predict_range: {e}")
+        print(traceback.format_exc())
         raise HTTPException(status_code=500, detail=f"Chyba při predikci: {str(e)}")
 
 if __name__ == '__main__':
