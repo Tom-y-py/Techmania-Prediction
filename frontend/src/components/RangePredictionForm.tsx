@@ -1,23 +1,35 @@
-'use client';
+"use client";
 
-import { useState } from 'react';
-import { format } from 'date-fns';
-import { cs } from 'date-fns/locale';
-import { api } from '@/lib/api';
-import type { RangePredictionResponse } from '@/types/api';
-import ExportButton from './ExportButton';
+import { useState } from "react";
+import { format } from "date-fns";
+import { cs } from "date-fns/locale";
+import { api } from "@/lib/api";
+import type { RangePredictionResponse } from "@/types/api";
+import ExportButton from "./ExportButton";
 
 export default function RangePredictionForm() {
-  const [startDate, setStartDate] = useState('');
-  const [endDate, setEndDate] = useState('');
+  const [startDate, setStartDate] = useState("");
+  const [endDate, setEndDate] = useState("");
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<RangePredictionResponse | null>(null);
-  const [error, setError] = useState('');
+  const [error, setError] = useState("");
+
+  const isClosed = (date: string, dayOfWeek: string): boolean => {
+    if (dayOfWeek !== "Pondělí") {
+      return false;
+    }
+    
+    const dateObj = new Date(date);
+    const month = dateObj.getMonth() + 1;
+    const isSummer = month >= 6 && month <= 8;
+    
+    return !isSummer;
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
-    setError('');
+    setError("");
     setResult(null);
 
     try {
@@ -27,7 +39,10 @@ export default function RangePredictionForm() {
       });
       setResult(prediction);
     } catch (err: any) {
-      const errorMessage = err.response?.data?.detail || err.message || 'Chyba při načítání predikce';
+      const errorMessage =
+        err.response?.data?.detail ||
+        err.message ||
+        "Chyba při načítání predikce";
       setError(errorMessage);
     } finally {
       setLoading(false);
@@ -45,9 +60,15 @@ export default function RangePredictionForm() {
             Získejte predikci pro více dní najednou
           </p>
 
-          <form onSubmit={handleSubmit} className="mt-8 grid grid-cols-1 gap-6 sm:grid-cols-2">
+          <form
+            onSubmit={handleSubmit}
+            className="mt-8 grid grid-cols-1 gap-6 sm:grid-cols-2"
+          >
             <div>
-              <label htmlFor="startDate" className="block text-sm font-medium leading-6 text-gray-900">
+              <label
+                htmlFor="startDate"
+                className="block text-sm font-medium leading-6 text-gray-900"
+              >
                 Datum od
               </label>
               <input
@@ -61,7 +82,10 @@ export default function RangePredictionForm() {
             </div>
 
             <div>
-              <label htmlFor="endDate" className="block text-sm font-medium leading-6 text-gray-900">
+              <label
+                htmlFor="endDate"
+                className="block text-sm font-medium leading-6 text-gray-900"
+              >
                 Datum do
               </label>
               <input
@@ -80,7 +104,7 @@ export default function RangePredictionForm() {
                 disabled={loading}
                 className="w-full rounded-md bg-techmania-blue px-3.5 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-blue-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-techmania-blue disabled:opacity-50"
               >
-                {loading ? 'Načítání...' : 'Spustit predikci'}
+                {loading ? "Načítání..." : "Spustit predikci"}
               </button>
             </div>
           </form>
@@ -100,17 +124,22 @@ export default function RangePredictionForm() {
                       Celková predikce
                     </h3>
                     <p className="text-3xl font-bold text-techmania-blue">
-                      {Math.round(result.total_predicted).toLocaleString('cs-CZ')} návštěvníků
+                      {Math.round(result.total_predicted).toLocaleString(
+                        "cs-CZ"
+                      )}{" "}
+                      návštěvníků
                     </p>
                     <p className="text-sm text-gray-600 mt-1">
                       Pro období {result.predictions.length} dní
                     </p>
                     <p className="text-sm text-gray-600">
-                      Průměrně {Math.round(result.average_daily).toLocaleString('cs-CZ')} návštěvníků / den
+                      Průměrně{" "}
+                      {Math.round(result.average_daily).toLocaleString("cs-CZ")}{" "}
+                      návštěvníků / den
                     </p>
                   </div>
-                  <ExportButton 
-                    data={result.predictions} 
+                  <ExportButton
+                    data={result.predictions}
                     filename={`techmania_predikce_${startDate}_${endDate}`}
                   />
                 </div>
@@ -142,9 +171,14 @@ export default function RangePredictionForm() {
                   </thead>
                   <tbody className="divide-y divide-gray-200 bg-white">
                     {result.predictions.map((prediction, idx) => (
-                      <tr key={idx} className={prediction.is_weekend ? 'bg-blue-50' : ''}>
+                      <tr
+                        key={idx}
+                        className={prediction.is_weekend ? "bg-blue-50" : ""}
+                      >
                         <td className="whitespace-nowrap py-4 pl-4 pr-3 text-sm font-medium text-gray-900 sm:pl-6">
-                          {format(new Date(prediction.date), 'dd.MM.yyyy', { locale: cs })}
+                          {format(new Date(prediction.date), "dd.MM.yyyy", {
+                            locale: cs,
+                          })}
                         </td>
                         <td className="whitespace-nowrap px-3 py-4 text-sm text-gray-700">
                           <div className="flex items-center gap-2">
@@ -154,25 +188,53 @@ export default function RangePredictionForm() {
                                 Víkend
                               </span>
                             )}
+                            {isClosed(prediction.date, prediction.day_of_week) && (
+                              <span className="inline-flex items-center rounded-full bg-red-100 px-2 py-0.5 text-xs font-medium text-red-800">
+                                Zavřeno
+                              </span>
+                            )}
                           </div>
                         </td>
                         <td className="whitespace-nowrap px-3 py-4 text-sm font-bold text-gray-900">
-                          {Math.round(prediction.predicted_visitors).toLocaleString('cs-CZ')}
+                          {Math.round(
+                            prediction.predicted_visitors
+                          ).toLocaleString("cs-CZ")}
                         </td>
                         <td className="whitespace-nowrap px-3 py-4 text-xs text-gray-500">
-                          {Math.round(prediction.confidence_interval.lower).toLocaleString('cs-CZ')} - {Math.round(prediction.confidence_interval.upper).toLocaleString('cs-CZ')}
+                          {Math.round(
+                            prediction.confidence_interval.lower
+                          ).toLocaleString("cs-CZ")}{" "}
+                          -{" "}
+                          {Math.round(
+                            prediction.confidence_interval.upper
+                          ).toLocaleString("cs-CZ")}
                         </td>
                         <td className="px-3 py-4 text-sm text-gray-700">
                           <div className="flex flex-col gap-1">
                             <div className="flex items-center gap-2">
-                              <span className="font-medium">{prediction.weather_info.temperature_mean.toFixed(1)}°C</span>
-                              {prediction.weather_info.is_nice_weather && <span>☀️</span>}
+                              <span className="font-medium">
+                                {prediction.weather_info.temperature_mean.toFixed(
+                                  1
+                                )}
+                                °C
+                              </span>
+                              {prediction.weather_info.is_nice_weather && (
+                                <span>☀️</span>
+                              )}
                             </div>
                             <div className="text-xs text-gray-500">
                               {prediction.weather_info.precipitation > 0 && (
-                                <span>🌧️ {prediction.weather_info.precipitation.toFixed(1)}mm</span>
+                                <span>
+                                  🌧️{" "}
+                                  {prediction.weather_info.precipitation.toFixed(
+                                    1
+                                  )}
+                                  mm
+                                </span>
                               )}
-                              {prediction.weather_info.precipitation === 0 && <span>Bez srážek</span>}
+                              {prediction.weather_info.precipitation === 0 && (
+                                <span>Bez srážek</span>
+                              )}
                             </div>
                             <div className="text-xs text-gray-400">
                               {prediction.weather_info.weather_description}
