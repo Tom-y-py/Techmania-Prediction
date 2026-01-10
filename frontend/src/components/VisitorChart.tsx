@@ -63,12 +63,13 @@ export default function VisitorChart() {
           setTodayData(null);
         }
         
-        // Načteme predikci pouze od dneška dopředu (nelze generovat predikce pro minulost)
-        // Weather API neposkytuje forecast data pro minulé dny
+        // Načteme predikci pouze od dneška dopředu
+        // Pro minulost používáme skutečná historická data (už načtená výše)
+        // Weather forecast API nepodporuje predikce pro minulé dny
         try {
           const now = new Date();
           const end = new Date(now);
-          end.setDate(end.getDate() + 7);
+          end.setDate(end.getDate() + 10); // 10 dní dopředu
           
           // Formátujeme datumy ve formátu YYYY-MM-DD (stejně jako v RangePredictionForm)
           const formatDateString = (date: Date): string => {

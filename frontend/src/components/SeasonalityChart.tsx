@@ -13,6 +13,7 @@ import {
 import { Bar } from 'react-chartjs-2';
 import { api } from '@/lib/api';
 import type { SeasonalityData } from '@/types/api';
+import { useTranslations } from '@/lib/i18n';
 
 ChartJS.register(
   CategoryScale,
@@ -24,6 +25,7 @@ ChartJS.register(
 );
 
 export default function SeasonalityChart() {
+  const t = useTranslations('analytics.seasonalityChart');
   const [data, setData] = useState<SeasonalityData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -68,23 +70,27 @@ export default function SeasonalityChart() {
     );
   }
 
-  const weekdayOrder = ['Pondělí', 'Úterý', 'Středa', 'Čtvrtek', 'Pátek', 'Sobota', 'Neděle'];
-  const monthOrder = ['Leden', 'Únor', 'Březen', 'Duben', 'Květen', 'Červen', 
-                      'Červenec', 'Srpen', 'Září', 'Říjen', 'Listopad', 'Prosinec'];
+  const weekdayOrder = [t('monday'), t('tuesday'), t('wednesday'), t('thursday'), t('friday'), t('saturday'), t('sunday')];
+  const weekdayKeys = ['Pondělí', 'Úterý', 'Středa', 'Čtvrtek', 'Pátek', 'Sobota', 'Neděle'];
+  
+  const monthOrder = [t('january'), t('february'), t('march'), t('april'), t('may'), t('june'), 
+                      t('july'), t('august'), t('september'), t('october'), t('november'), t('december')];
+  const monthKeys = ['Leden', 'Únor', 'Březen', 'Duben', 'Květen', 'Červen', 
+                     'Červenec', 'Srpen', 'Září', 'Říjen', 'Listopad', 'Prosinec'];
 
   const chartData = view === 'weekday' 
     ? {
-        labels: weekdayOrder.filter(day => data.by_weekday[day]),
+        labels: weekdayKeys.map((key, idx) => data.by_weekday[key] ? weekdayOrder[idx] : null).filter(Boolean),
         datasets: [{
-          label: 'Průměrná návštěvnost',
-          data: weekdayOrder.filter(day => data.by_weekday[day]).map(day => data.by_weekday[day]),
-          backgroundColor: weekdayOrder.filter(day => data.by_weekday[day]).map((day, idx) => 
-            ['Sobota', 'Neděle'].includes(day) 
+          label: t('averageVisitors'),
+          data: weekdayKeys.filter(key => data.by_weekday[key]).map(key => data.by_weekday[key]),
+          backgroundColor: weekdayKeys.filter(key => data.by_weekday[key]).map((key) => 
+            ['Sobota', 'Neděle'].includes(key) 
               ? 'rgba(255, 99, 132, 0.6)' 
               : 'rgba(0, 102, 204, 0.6)'
           ),
-          borderColor: weekdayOrder.filter(day => data.by_weekday[day]).map((day, idx) => 
-            ['Sobota', 'Neděle'].includes(day) 
+          borderColor: weekdayKeys.filter(key => data.by_weekday[key]).map((key) => 
+            ['Sobota', 'Neděle'].includes(key) 
               ? 'rgb(255, 99, 132)' 
               : 'rgb(0, 102, 204)'
           ),
@@ -92,10 +98,10 @@ export default function SeasonalityChart() {
         }]
       }
     : {
-        labels: monthOrder.filter(month => data.by_month[month]),
+        labels: monthKeys.map((key, idx) => data.by_month[key] ? monthOrder[idx] : null).filter(Boolean),
         datasets: [{
-          label: 'Průměrná návštěvnost',
-          data: monthOrder.filter(month => data.by_month[month]).map(month => data.by_month[month]),
+          label: t('averageVisitors'),
+          data: monthKeys.filter(key => data.by_month[key]).map(key => data.by_month[key]),
           backgroundColor: 'rgba(0, 102, 204, 0.6)',
           borderColor: 'rgb(0, 102, 204)',
           borderWidth: 2,
@@ -111,7 +117,7 @@ export default function SeasonalityChart() {
       },
       title: {
         display: true,
-        text: view === 'weekday' ? 'Návštěvnost podle dne v týdnu' : 'Návštěvnost podle měsíce',
+        text: view === 'weekday' ? t('byWeekday') : t('byMonth'),
         font: {
           size: 16,
           weight: 'bold' as const,
@@ -120,7 +126,7 @@ export default function SeasonalityChart() {
       tooltip: {
         callbacks: {
           label: function(context: any) {
-            return `${context.parsed.y.toLocaleString('cs-CZ')} návštěvníků`;
+            return `${context.parsed.y.toLocaleString('cs-CZ')} ${t('visitors')}`;
           }
         }
       }
@@ -141,7 +147,7 @@ export default function SeasonalityChart() {
     <div className="bg-white dark:bg-gray-800 shadow-sm ring-1 ring-gray-900/5 dark:ring-gray-700 sm:rounded-xl p-6">
       <div className="flex items-center justify-between mb-4">
         <h3 className="text-lg font-semibold text-gray-900 dark:text-white">
-          Sezonalita návštěvnosti
+          {t('title')}
         </h3>
         <div className="flex gap-2">
           <button
@@ -152,7 +158,7 @@ export default function SeasonalityChart() {
                 : 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600'
             }`}
           >
-            Den v týdnu
+            {t('dayOfWeek')}
           </button>
           <button
             onClick={() => setView('month')}
@@ -162,7 +168,7 @@ export default function SeasonalityChart() {
                 : 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600'
             }`}
           >
-            Měsíc
+            {t('month')}            Měsíc
           </button>
         </div>
       </div>
@@ -172,22 +178,22 @@ export default function SeasonalityChart() {
       </div>
 
       {/* Holiday vs Regular Stats */}
-      {data.holiday_vs_regular.holiday_avg > 0 && (
+      {data.holiday_vs_regular && data.holiday_vs_regular.holiday_avg > 0 && (
         <div className="mt-6 grid grid-cols-3 gap-4">
           <div className="bg-gray-50 dark:bg-gray-900 rounded-lg p-4">
-            <div className="text-sm text-gray-600 dark:text-gray-400">Svátky</div>
+            <div className="text-sm text-gray-600 dark:text-gray-400">{t('holidays')}</div>
             <div className="text-xl font-bold text-gray-900 dark:text-white">
               {data.holiday_vs_regular.holiday_avg.toLocaleString('cs-CZ', { maximumFractionDigits: 0 })}
             </div>
           </div>
           <div className="bg-gray-50 dark:bg-gray-900 rounded-lg p-4">
-            <div className="text-sm text-gray-600 dark:text-gray-400">Běžný den</div>
+            <div className="text-sm text-gray-600 dark:text-gray-400">{t('regularDay')}</div>
             <div className="text-xl font-bold text-gray-900 dark:text-white">
               {data.holiday_vs_regular.regular_avg.toLocaleString('cs-CZ', { maximumFractionDigits: 0 })}
             </div>
           </div>
           <div className="bg-gray-50 dark:bg-gray-900 rounded-lg p-4">
-            <div className="text-sm text-gray-600 dark:text-gray-400">Rozdíl</div>
+            <div className="text-sm text-gray-600 dark:text-gray-400">{t('difference')}</div>
             <div className={`text-xl font-bold ${
               data.holiday_vs_regular.difference > 0 ? 'text-green-600' : 'text-red-600'
             }`}>

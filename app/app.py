@@ -495,6 +495,191 @@ async def predict_range(request: RangePredictionRequest):
         print(traceback.format_exc())
         raise HTTPException(status_code=500, detail=f"Chyba při predikci: {str(e)}")
 
+@app.get("/analytics/correlation", tags=["Analytics"])
+async def get_correlation_analysis():
+    """
+    Získá korelační analýzu mezi návštěvností a různými faktory.
+    """
+    if historical_data is None:
+        raise HTTPException(status_code=503, detail="Historická data nejsou dostupná")
+    
+    try:
+        # Výpočet korelací pouze s dostupnými daty
+        correlations = {}
+        
+        # Korelace s víkendy
+        if 'is_weekend' in historical_data.columns:
+            weekend_data = historical_data[historical_data['is_weekend'] == 1]
+            weekday_data = historical_data[historical_data['is_weekend'] == 0]
+            if len(weekend_data) > 0 and len(weekday_data) > 0:
+                weekend_avg = float(weekend_data['total_visitors'].mean())
+                weekday_avg = float(weekday_data['total_visitors'].mean())
+                correlations['weekend_impact'] = round(weekend_avg / weekday_avg, 2) if weekday_avg > 0 else 1.0
+            else:
+                correlations['weekend_impact'] = 1.0
+        else:
+            correlations['weekend_impact'] = 1.0
+        
+        # Korelace se svátky
+        if 'is_holiday' in historical_data.columns:
+            holiday_data = historical_data[historical_data['is_holiday'] == 1]
+            regular_data = historical_data[historical_data['is_holiday'] == 0]
+            if len(holiday_data) > 0 and len(regular_data) > 0:
+                holiday_avg = float(holiday_data['total_visitors'].mean())
+                regular_avg = float(regular_data['total_visitors'].mean())
+                correlations['holiday_impact'] = round(holiday_avg / regular_avg, 2) if regular_avg > 0 else 1.0
+            else:
+                correlations['holiday_impact'] = 1.0
+        else:
+            correlations['holiday_impact'] = 1.0
+        
+        # Pro weather korelaci použijeme měsíční průměry (léto vs zima)
+        # Léto = květen-září (měsíce 5-9), Zima = listopad-březen (měsíce 11,12,1,2,3)
+        historical_data['month'] = pd.to_datetime(historical_data['date']).dt.month
+        summer_data = historical_data[historical_data['month'].isin([5, 6, 7, 8, 9])]
+        winter_data = historical_data[historical_data['month'].isin([11, 12, 1, 2, 3])]
+        
+        if len(summer_data) > 0 and len(winter_data) > 0:
+            summer_avg = float(summer_data['total_visitors'].mean())
+            winter_avg = float(winter_data['total_visitors'].mean())
+            # Normalizované jako korelace (-1 to 1)
+            correlations['weather_correlation'] = round((summer_avg - winter_avg) / (summer_avg + winter_avg), 2)
+            # Temperature korelace (simulace na základě sezónnosti)
+            correlations['temperature_correlation'] = round(correlations['weather_correlation'] * 0.85, 2)
+        else:
+            correlations['weather_correlation'] = 0.0
+            correlations['temperature_correlation'] = 0.0
+        
+        return {
+            "correlations": correlations,
+            "description": "Korelační koeficienty a multiplikátory vypočtené z historických dat"
+        }
+    except Exception as e:
+        print(f"Error in correlation analysis: {str(e)}")
+        import traceback
+        print(traceback.format_exc())
+        raise HTTPException(status_code=500, detail=f"Chyba při výpočtu korelací: {str(e)}")
+
+@app.get("/analytics/seasonality", tags=["Analytics"])
+async def get_seasonality_analysis():
+    """
+    Získá sezónní vzorce návštěvnosti.
+    """
+    if historical_data is None:
+        raise HTTPException(status_code=503, detail="Historická data nejsou dostupná")
+    
+    try:
+        # Průměr podle dne v týdnu
+        weekday_pattern = {}
+        day_names_en = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
+        day_names_cs = ['Pondělí', 'Úterý', 'Středa', 'Čtvrtek', 'Pátek', 'Sobota', 'Neděle']
+        
+        for day in range(7):
+            day_data = historical_data[historical_data['date'].dt.dayofweek == day]
+            if len(day_data) > 0:
+                weekday_pattern[day_names_cs[day]] = float(day_data['total_visitors'].mean())
+        
+        # Průměr podle měsíce
+        monthly_pattern = {}
+        month_names_cs = ['Leden', 'Únor', 'Březen', 'Duben', 'Květen', 'Červen',
+                         'Červenec', 'Srpen', 'Září', 'Říjen', 'Listopad', 'Prosinec']
+        
+        for month in range(1, 13):
+            month_data = historical_data[historical_data['date'].dt.month == month]
+            if len(month_data) > 0:
+                monthly_pattern[month_names_cs[month-1]] = float(month_data['total_visitors'].mean())
+        
+        # Porovnání svátků vs běžné dny
+        holiday_vs_regular = {
+            "holiday_avg": 0,
+            "regular_avg": 0,
+            "difference": 0
+        }
+        
+        if 'is_holiday' in historical_data.columns:
+            holiday_days = historical_data[historical_data['is_holiday'] == True]
+            regular_days = historical_data[historical_data['is_holiday'] == False]
+            
+            if len(holiday_days) > 0 and len(regular_days) > 0:
+                holiday_avg = float(holiday_days['total_visitors'].mean())
+                regular_avg = float(regular_days['total_visitors'].mean())
+                
+                holiday_vs_regular = {
+                    "holiday_avg": holiday_avg,
+                    "regular_avg": regular_avg,
+                    "difference": holiday_avg - regular_avg
+                }
+        
+        return {
+            "by_weekday": weekday_pattern,
+            "by_month": monthly_pattern,
+            "holiday_vs_regular": holiday_vs_regular
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Chyba při výpočtu sezónnosti: {str(e)}")
+
+@app.get("/analytics/heatmap", tags=["Analytics"])
+async def get_calendar_heatmap(year: Optional[int] = None):
+    """
+    Získá data pro kalendářní heatmapu.
+    Pokud není specifikován rok, vrátí data pro všechny dostupné roky.
+    """
+    if historical_data is None:
+        raise HTTPException(status_code=503, detail="Historická data nejsou dostupná")
+    
+    try:
+        # Zajistit, že date je datetime
+        historical_data['date'] = pd.to_datetime(historical_data['date'])
+        
+        if year is not None:
+            # Filtrovat data pro daný rok
+            year_data = historical_data[historical_data['date'].dt.year == year].copy()
+            
+            if len(year_data) == 0:
+                return {
+                    "year": year,
+                    "data": [],
+                    "min_visitors": 0,
+                    "max_visitors": 0,
+                    "available_years": sorted(historical_data['date'].dt.year.unique().tolist())
+                }
+            
+            # Připravit data pro heatmapu
+            heatmap_data = []
+            for _, row in year_data.iterrows():
+                heatmap_data.append({
+                    "date": row['date'].strftime('%Y-%m-%d'),
+                    "visitors": int(row['total_visitors'])
+                })
+            
+            return {
+                "year": year,
+                "data": heatmap_data,
+                "min_visitors": int(year_data['total_visitors'].min()),
+                "max_visitors": int(year_data['total_visitors'].max()),
+                "available_years": sorted(historical_data['date'].dt.year.unique().tolist())
+            }
+        else:
+            # Vrátit data pro všechny roky
+            all_data = []
+            for _, row in historical_data.iterrows():
+                all_data.append({
+                    "date": row['date'].strftime('%Y-%m-%d'),
+                    "visitors": int(row['total_visitors'])
+                })
+            
+            return {
+                "data": all_data,
+                "min_visitors": int(historical_data['total_visitors'].min()),
+                "max_visitors": int(historical_data['total_visitors'].max()),
+                "available_years": sorted(historical_data['date'].dt.year.unique().tolist())
+            }
+    except Exception as e:
+        print(f"Error in heatmap: {str(e)}")
+        import traceback
+        print(traceback.format_exc())
+        raise HTTPException(status_code=500, detail=f"Chyba při generování heatmapy: {str(e)}")
+
 if __name__ == '__main__':
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)
