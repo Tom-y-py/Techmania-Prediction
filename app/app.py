@@ -33,6 +33,22 @@ API_TITLE = os.getenv('API_TITLE', 'Techmania Prediction API')
 API_VERSION = os.getenv('API_VERSION', '2.0.0')
 DEBUG = os.getenv('DEBUG', 'true').lower() == 'true'
 
+# Nastavení cest podle prostředí
+if ENVIRONMENT == 'production':
+    # Cesty v Docker kontejneru
+    BASE_DIR = Path('/app')
+    MODELS_DIR = BASE_DIR / 'models'
+    DATA_DIR = BASE_DIR / 'data' / 'raw'
+else:
+    # Lokální cesty pro development
+    BASE_DIR = Path(__file__).parent.parent
+    MODELS_DIR = BASE_DIR / 'models'
+    DATA_DIR = BASE_DIR / 'data' / 'raw'
+
+print(f"🔧 Prostředí: {ENVIRONMENT}")
+print(f"📁 Adresář modelů: {MODELS_DIR}")
+print(f"📁 Adresář dat: {DATA_DIR}")
+
 # Inicializace FastAPI
 app = FastAPI(
     title=API_TITLE,
@@ -129,25 +145,21 @@ async def load_models():
     """Načte všechny natrénované modely a historická data."""
     global models, feature_columns, ensemble_weights, historical_data
     
-    # Cesty v Docker kontejneru
-    models_dir = Path('/app/models')
-    data_dir = Path('/app/data/raw')
-    
     try:
         # Načtení jednotlivých modelů
-        models['lightgbm'] = joblib.load(models_dir / 'lightgbm_model.pkl')
-        models['xgboost'] = joblib.load(models_dir / 'xgboost_model.pkl')
-        models['catboost'] = joblib.load(models_dir / 'catboost_model.pkl')
+        models['lightgbm'] = joblib.load(MODELS_DIR / 'lightgbm_model.pkl')
+        models['xgboost'] = joblib.load(MODELS_DIR / 'xgboost_model.pkl')
+        models['catboost'] = joblib.load(MODELS_DIR / 'catboost_model.pkl')
         
         # Načtení vah ensemble
-        ensemble_weights = joblib.load(models_dir / 'ensemble_weights.pkl')
+        ensemble_weights = joblib.load(MODELS_DIR / 'ensemble_weights.pkl')
         
         # Načtení seznamu features
-        feature_columns = joblib.load(models_dir / 'feature_columns.pkl')
+        feature_columns = joblib.load(MODELS_DIR / 'feature_columns.pkl')
         
         # Načtení historických dat pro statistiky
         try:
-            historical_data = pd.read_csv(data_dir / 'techmania_cleaned_master.csv')
+            historical_data = pd.read_csv(DATA_DIR / 'techmania_cleaned_master.csv')
             historical_data['date'] = pd.to_datetime(historical_data['date'])
             print(f"   - Historická data: {len(historical_data)} záznamů")
         except Exception as e:
