@@ -139,8 +139,17 @@ def create_features(df: pd.DataFrame) -> pd.DataFrame:
             # Mráz speciálně o víkendu (kdy by normálně bylo nejvíc lidí)
             df['weekend_cold_penalty'] = df['is_weekend'] * df['cold_penalty']
         
-        # Srážky × Víkend (déšť o víkendu je horší než v týdnu)
+        # Srážky × Víkend - ROZLIŠUJEME déšť vs sníh!
         if 'precipitation' in df.columns:
+            # Déšť o víkendu = lidé hledají vnitřní aktivity = MŮŽE BÝT BONUS
+            df['rain_x_weekend'] = (
+                (df['precipitation'] > 0).astype(int) * 
+                (df['temperature_mean'] > 5).astype(int) *  # Bezpečné teploty
+                df['is_weekend'] * 
+                (~df['is_snowy']).astype(int)
+            )
+            
+            # Pro kompatibilitu (starý feature) - ale s menší váhou pro déšť
             df['precip_x_weekend'] = df['precipitation'] * df['is_weekend']
             df['precip_x_summer'] = df['precipitation'] * df['is_summer_holiday']
         
@@ -166,32 +175,65 @@ def create_features(df: pd.DataFrame) -> pd.DataFrame:
                 (df['precipitation'] > 0).astype(int)
             )
             
-            # Opravdu špatné počasí = zima + srážky (SILNĚJŠÍ penalizace)
-            df['bad_weather_score'] = (
-                (df['temperature_mean'] < 0).astype(int) * 5 +    # Mráz = 5 bodů! 
-                (df['temperature_mean'] < -5).astype(int) * 3 +   # Pod -5°C = +3 body
-                (df['temperature_mean'] < -10).astype(int) * 3 +  # Pod -10°C = +3 body
-                (df['precipitation'] > 5).astype(int) * 3 +       # Hodně srážek = 3 body
-                (df['precipitation'] > 0).astype(int) +           # Jakékoli srážky = 1 bod
-                df['is_snowy'] * 5 +                              # Sníh = 5 bodů (VELMI špatné)
-                (df['snowfall'] > 0).astype(int) * 3 +            # Sněžení = 3 body
-                df['is_windy'] * 2                                # Vítr = 2 body
+            # KLÍČOVÉ: Déšť vs Sníh - rozdílný efekt!
+            # Déšť (teplo) = lidé jdou dovnitř = BONUS pro Techmanii ✅
+            # Sníh (zima) = nebezpečné cesty = PENALIZACE ❌
+            df['rain_indoor_bonus'] = (
+                (df['temperature_mean'] > 5).astype(int) *  # Teplo = bezpečné cesty
+                (df['precipitation'] > 2).astype(int) *      # Hodně prší
+                (~df['is_snowy']).astype(int)                # Není sníh
             )
             
-            # Mráz + sníh + víkend = EXTRÉMNÍ penalizace
+            # Špatné počasí score - ROZDÍLNÉ pro sníh vs déšť
+            df['bad_weather_score'] = (
+                # MRÁZ a SNÍH = velmi špatné (nebezpečné cesty, školy zavřené)
+                (df['temperature_mean'] < 0).astype(int) * 6 +       # Mráz = 6 bodů PENALIZACE
+                (df['temperature_mean'] < -5).astype(int) * 4 +      # Pod -5°C = +4 body
+                (df['temperature_mean'] < -10).astype(int) * 4 +     # Pod -10°C = +4 body
+                df['is_snowy'] * 8 +                                 # Sníh = 8 bodů! (NEJVĚTŠÍ penalizace)
+                (df['snowfall'] > 0).astype(int) * 5 +               # Sněžení = 5 bodů
+                
+                # DÉŠŤ (bez mrazu) = malá penalizace (jen nepohodlí, ale lidé stejně jedou)
+                (
+                    (df['temperature_mean'] >= 5).astype(int) *      # Bezpečné teploty
+                    (df['precipitation'] > 5).astype(int) *          # Hodně prší
+                    (~df['is_snowy']).astype(int)                    # Není sníh
+                ) * 1 +                                              # Jen 1 bod (téměř žádná penalizace)
+                
+                df['is_windy'] * 2                                   # Vítr = 2 body
+            )
+            
+            # Mráz + sníh + víkend = EXTRÉMNÍ penalizace (nikdo nejede)
             df['weekend_frozen_nightmare'] = (
                 df['is_weekend'] * 
                 (df['temperature_mean'] < 0).astype(int) * 
-                df['is_snowy']
+                df['is_snowy'] * 3  # Trojnásobek efektu!
             )
             
-            # Perfektní počasí pro návštěvu = teplo + sucho + víkend
+            # NOVÝ: Déšť + víkend = BONUS (lidé hledají vnitřní aktivity)
+            df['rainy_weekend_bonus'] = (
+                df['is_weekend'] * 
+                (df['temperature_mean'] > 5).astype(int) *  # Bezpečné teploty
+                (df['precipitation'] > 1).astype(int) *     # Prší
+                (~df['is_snowy']).astype(int)               # Není sníh
+            )
+            
+            # Perfektní počasí pro návštěvu 
+            # POZOR: Hezké počasí o víkendu může být HORŠÍ (konkurence venkovních aktivit!)
             df['perfect_weather_score'] = (
                 (df['temperature_mean'] > 15).astype(int) * 2 +  # Teplo = 2 body
                 (df['temperature_mean'] > 20).astype(int) +       # Ještě tepleji = +1 bod
                 (df['precipitation'] == 0).astype(int) * 2 +      # Sucho = 2 body
                 df['is_nice_weather'] * 2 +                       # Hezké počasí = 2 body
                 df['is_weekend']                                   # Víkend = 1 bod
+            )
+            
+            # NOVÝ: Konkurence venkovních aktivit (hezké počasí o víkendu = méně lidí)
+            df['outdoor_competition'] = (
+                (df['temperature_mean'] > 18).astype(int) *  # Krásné teplo
+                (df['precipitation'] == 0).astype(int) *     # Sucho
+                df['is_weekend'] *                           # Víkend
+                (~df['is_summer_holiday']).astype(int)       # Mimo hlavní prázdniny
             )
         
         # Tepelný komfort (ne moc horko, ne moc zima)
@@ -224,11 +266,18 @@ def split_data(
     """
     print(f"\n📊 Splitting data...")
     
+    # Vyplnit NaN hodnoty místo mazání řádků
     numeric_cols = df.select_dtypes(include=['int64', 'int32', 'float64', 'float32', 'bool', 'uint8']).columns
-    df_before = len(df)
-    df = df.dropna(subset=numeric_cols)
-    print(f"  Dropped {df_before - len(df)} rows with NaN in numeric features")
-    print(f"  Remaining data: {len(df)} rows ({df['date'].min()} - {df['date'].max()})")
+    nan_counts = df[numeric_cols].isna().sum()
+    cols_with_nan = nan_counts[nan_counts > 0]
+    
+    if len(cols_with_nan) > 0:
+        print(f"  Found NaN values in {len(cols_with_nan)} columns, filling with 0...")
+        for col in cols_with_nan.index:
+            print(f"    - {col}: {cols_with_nan[col]} NaN values")
+        df[numeric_cols] = df[numeric_cols].fillna(0)
+    
+    print(f"  Total data: {len(df)} rows ({df['date'].min()} - {df['date'].max()})")
     
     print(f"\n  Train period: до {train_end}")
     print(f"  Validation period: {train_end} - {val_end}")
