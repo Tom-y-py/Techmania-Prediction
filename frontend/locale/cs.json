@@ -1,0 +1,173 @@
+{
+  "common": {
+    "dashboard": "Dashboard",
+    "predictions": "Predikce",
+    "analytics": "Analýza",
+    "information": "Informace",
+    "settings": "Nastavení"
+  },
+  "dashboard": {
+    "title": "Dashboard Návštěvnosti",
+    "subtitle": "Analýza a predikce návštěvnosti science centra Techmania",
+    "predictionsTitle": "Predikce návštěvnosti"
+  },
+  "info": {
+    "title": "Informace o systému",
+    "subtitle": "Detailní informace o predikčním modelu a technologiích",
+    "aboutProject": "O projektu",
+    "aboutDescription": "Tento systém byl vytvořen pro predikci návštěvnosti science centra Techmania v Plzni. Využívá pokročilé techniky strojového učení a analýzy časových řad pro předpověď počtu návštěvníků na základě různých faktorů jako jsou počasí, den v týdnu, prázdniny a svátky.",
+    "ensembleModel": "Ensemble Model",
+    "ensembleDescription": "Systém využívá ensemble learning – kombinaci tří různých modelů pro dosažení maximální přesnosti:",
+    "lightgbm": {
+      "title": "LightGBM",
+      "weight": "Váha: 45%",
+      "feature1": "Komplexní nelineární vztahy",
+      "feature2": "Kategorie a interakce",
+      "feature3": "Robustní k outlierům"
+    },
+    "prophet": {
+      "title": "Prophet",
+      "weight": "Váha: 30%",
+      "feature1": "Časové řady",
+      "feature2": "Detekce sezónnosti",
+      "feature3": "Dlouhodobé trendy"
+    },
+    "neuralNetwork": {
+      "title": "Neural Network",
+      "weight": "Váha: 25%",
+      "feature1": "Skryté vzory",
+      "feature2": "Sekvenční závislosti",
+      "feature3": "Krátkodobé predikce"
+    },
+    "inputFactors": "Vstupní faktory",
+    "timeFactors": "Časové faktory",
+    "timeFactor1": "Den v týdnu",
+    "timeFactor2": "Měsíc v roce",
+    "timeFactor3": "Prázdniny (letní, vánoční, jarní)",
+    "timeFactor4": "Státní svátky",
+    "timeFactor5": "Víkendy a pracovní dny",
+    "weather": "Počasí",
+    "weatherFactor1": "Teplota (°C)",
+    "weatherFactor2": "Srážky (mm)",
+    "weatherFactor3": "Oblačnost (%)",
+    "weatherFactor4": "Tlak vzduchu (hPa)",
+    "weatherFactor5": "Rychlost větru (km/h)",
+    "technologies": "Použité technologie",
+    "backend": "Backend",
+    "frontend": "Frontend",
+    "metrics": "Metriky přesnosti",
+    "metricsDescription": "Model dosahuje průměrné chyby okolo 100 návštěvníků a vysvětluje přibližně 85% variability v datech."
+  },
+  "settings": {
+    "title": "Nastavení",
+    "subtitle": "Přizpůsobte si aplikaci podle svých preferencí",
+    "saved": "Nastavení bylo úspěšně uloženo",
+    "appearance": "Vzhled",
+    "darkMode": "Tmavý režim",
+    "darkModeDescription": "Přepnout aplikaci do tmavého režimu pro pohodlnější práci ve tmě",
+    "notifications": "Notifikace",
+    "enableNotifications": "Povolit notifikace",
+    "notificationsDescription": "Dostávejte upozornění na důležité události a změny",
+    "dataAndUpdates": "Data a aktualizace",
+    "autoRefresh": "Automatická aktualizace dat",
+    "autoRefreshDescription": "Pravidelně načítat nová data z API",
+    "refreshInterval": "Interval aktualizace (sekundy)",
+    "10seconds": "10 sekund",
+    "30seconds": "30 sekund",
+    "1minute": "1 minuta",
+    "5minutes": "5 minut",
+    "languageRegion": "Jazyk a region",
+    "language": "Jazyk aplikace",
+    "czech": "Čeština",
+    "english": "English",
+    "saveSettings": "Uložit nastavení"
+  },
+  "stats": {
+    "loading": "Načítání...",
+    "error": "Nepodařilo se načíst statistiky",
+    "notAvailable": "Statistiky nejsou dostupné",
+    "totalVisitors": "Celkový počet návštěvníků",
+    "avgDaily": "Průměr návštěvníků/den",
+    "peakDay": "Den s nejvyšší návštěvností",
+    "monthlyTrend": "Měsíční trend",
+    "period": "Období",
+    "trend": "trend",
+    "visitors": "návštěvníků",
+    "rising": "Rostoucí tendence",
+    "falling": "Klesající tendence",
+    "stable": "Stabilní"
+  },
+  "chart": {
+    "title": "Návštěvnost za poslední měsíc",
+    "actualVisitors": "Skutečná návštěvnost",
+    "predictedVisitors": "Předpověď návštěvnosti",
+    "confidenceUpper": "Horní interval spolehlivosti",
+    "confidenceLower": "Dolní interval spolehlivosti",
+    "error": "Nepodařilo se načíst historická data",
+    "notAvailable": "Historická data nejsou dostupná"
+  },
+  "analytics": {
+    "title": "Datová analytika",
+    "subtitle": "Podrobná analýza historických dat a trendů návštěvnosti",
+    "trendAnalysis": "Analýza trendu",
+    "seasonality": "Sezonalita",
+    "correlations": "Korelace a vlivy",
+    "heatmap": "Calendar Heatmap",
+    "insights": "Klíčová zjištění"
+  },
+  "predictions": {
+    "rangeTitle": "Predikce pro rozsah dat",
+    "rangeDescription": "Získejte predikci pro více dní najednou",
+    "dateFrom": "Datum od",
+    "dateTo": "Datum do",
+    "loading": "Načítání...",
+    "submit": "Spustit predikci",
+    "totalPrediction": "Celková predikce",
+    "visitors": "návštěvníků",
+    "forPeriod": "Pro období",
+    "days": "dní",
+    "averageDaily": "Průměrně",
+    "perDay": "návštěvníků / den",
+    "date": "Datum",
+    "day": "Den",
+    "visitorsShort": "Návštěvníci",
+    "interval": "Interval",
+    "weather": "Počasí",
+    "holiday": "Svátek",
+    "weekend": "Víkend",
+    "closed": "Zavřeno",
+    "noPrecipitation": "Bez srážek",
+    "error": "Chyba při načítání predikce"
+  },
+  "export": {
+    "button": "Exportovat",
+    "exporting": "Exportuji...",
+    "csv": "CSV",
+    "json": "JSON",
+    "date": "Datum",
+    "predictedVisitors": "Predikovaný počet návštěvníků"
+  },
+  "header": {
+    "title": "Techmania Dashboard",
+    "notifications": "Zobrazit notifikace",
+    "userMenu": "Otevřít uživatelské menu",
+    "profile": "Profil",
+    "logout": "Odhlásit se"
+  },
+  "errors": {
+    "title": "Chyba",
+    "subtitle": "Něco se pokazilo",
+    "description": "Omlouváme se, ale došlo k neočekávané chybě. Zkuste to prosím znovu.",
+    "tryAgain": "Zkusit znovu",
+    "goHome": "Domů",
+    "notFoundTitle": "Stránka nenalezena",
+    "notFoundDescription": "Omlouváme se, ale stránka, kterou hledáte, neexistuje.",
+    "backToHome": "Zpět na hlavní stránku"
+  },
+  "health": {
+    "checking": "Kontrola připojení...",
+    "connected": "API připojeno",
+    "disconnected": "API nedostupné",
+    "features": "features"
+  }
+}

@@ -1,0 +1,173 @@
+{
+  "common": {
+    "dashboard": "Dashboard",
+    "predictions": "Predictions",
+    "analytics": "Analytics",
+    "information": "Information",
+    "settings": "Settings"
+  },
+  "dashboard": {
+    "title": "Visitor Dashboard",
+    "subtitle": "Analysis and prediction of Techmania science center attendance",
+    "predictionsTitle": "Visitor Predictions"
+  },
+  "info": {
+    "title": "System Information",
+    "subtitle": "Detailed information about the prediction model and technologies",
+    "aboutProject": "About the Project",
+    "aboutDescription": "This system was created to predict visitor attendance at the Techmania science center in Pilsen. It uses advanced machine learning techniques and time series analysis to forecast the number of visitors based on various factors such as weather, day of the week, holidays, and public holidays.",
+    "ensembleModel": "Ensemble Model",
+    "ensembleDescription": "The system uses ensemble learning – a combination of three different models to achieve maximum accuracy:",
+    "lightgbm": {
+      "title": "LightGBM",
+      "weight": "Weight: 45%",
+      "feature1": "Complex non-linear relationships",
+      "feature2": "Categories and interactions",
+      "feature3": "Robust to outliers"
+    },
+    "prophet": {
+      "title": "Prophet",
+      "weight": "Weight: 30%",
+      "feature1": "Time series",
+      "feature2": "Seasonality detection",
+      "feature3": "Long-term trends"
+    },
+    "neuralNetwork": {
+      "title": "Neural Network",
+      "weight": "Weight: 25%",
+      "feature1": "Hidden patterns",
+      "feature2": "Sequential dependencies",
+      "feature3": "Short-term predictions"
+    },
+    "inputFactors": "Input Factors",
+    "timeFactors": "Time Factors",
+    "timeFactor1": "Day of the week",
+    "timeFactor2": "Month of the year",
+    "timeFactor3": "Holidays (summer, Christmas, spring)",
+    "timeFactor4": "Public holidays",
+    "timeFactor5": "Weekends and weekdays",
+    "weather": "Weather",
+    "weatherFactor1": "Temperature (°C)",
+    "weatherFactor2": "Precipitation (mm)",
+    "weatherFactor3": "Cloud cover (%)",
+    "weatherFactor4": "Air pressure (hPa)",
+    "weatherFactor5": "Wind speed (km/h)",
+    "technologies": "Technologies Used",
+    "backend": "Backend",
+    "frontend": "Frontend",
+    "metrics": "Accuracy Metrics",
+    "metricsDescription": "The model achieves an average error of around 100 visitors and explains approximately 85% of the variability in the data."
+  },
+  "settings": {
+    "title": "Settings",
+    "subtitle": "Customize the application according to your preferences",
+    "saved": "Settings saved successfully",
+    "appearance": "Appearance",
+    "darkMode": "Dark Mode",
+    "darkModeDescription": "Switch the application to dark mode for more comfortable work in the dark",
+    "notifications": "Notifications",
+    "enableNotifications": "Enable Notifications",
+    "notificationsDescription": "Receive alerts about important events and changes",
+    "dataAndUpdates": "Data and Updates",
+    "autoRefresh": "Automatic Data Refresh",
+    "autoRefreshDescription": "Regularly fetch new data from the API",
+    "refreshInterval": "Refresh Interval (seconds)",
+    "10seconds": "10 seconds",
+    "30seconds": "30 seconds",
+    "1minute": "1 minute",
+    "5minutes": "5 minutes",
+    "languageRegion": "Language and Region",
+    "language": "Application Language",
+    "czech": "Čeština",
+    "english": "English",
+    "saveSettings": "Save Settings"
+  },
+  "stats": {
+    "loading": "Loading...",
+    "error": "Failed to load statistics",
+    "notAvailable": "Statistics are not available",
+    "totalVisitors": "Total Visitors",
+    "avgDaily": "Average Visitors/Day",
+    "peakDay": "Peak Attendance Day",
+    "monthlyTrend": "Monthly Trend",
+    "period": "Period",
+    "trend": "trend",
+    "visitors": "visitors",
+    "rising": "Rising trend",
+    "falling": "Falling trend",
+    "stable": "Stable"
+  },
+  "chart": {
+    "title": "Visitor Traffic - Last Month",
+    "actualVisitors": "Actual Visitors",
+    "predictedVisitors": "Predicted Visitors",
+    "confidenceUpper": "Upper Confidence Interval",
+    "confidenceLower": "Lower Confidence Interval",
+    "error": "Failed to load historical data",
+    "notAvailable": "Historical data is not available"
+  },
+  "analytics": {
+    "title": "Data Analytics",
+    "subtitle": "Detailed analysis of historical data and visitor trends",
+    "trendAnalysis": "Trend Analysis",
+    "seasonality": "Seasonality",
+    "correlations": "Correlations and Impacts",
+    "heatmap": "Calendar Heatmap",
+    "insights": "Key Insights"
+  },
+  "predictions": {
+    "rangeTitle": "Range Prediction",
+    "rangeDescription": "Get predictions for multiple days at once",
+    "dateFrom": "Date From",
+    "dateTo": "Date To",
+    "loading": "Loading...",
+    "submit": "Run Prediction",
+    "totalPrediction": "Total Prediction",
+    "visitors": "visitors",
+    "forPeriod": "For period of",
+    "days": "days",
+    "averageDaily": "Average",
+    "perDay": "visitors / day",
+    "date": "Date",
+    "day": "Day",
+    "visitorsShort": "Visitors",
+    "interval": "Interval",
+    "weather": "Weather",
+    "holiday": "Holiday",
+    "weekend": "Weekend",
+    "closed": "Closed",
+    "noPrecipitation": "No precipitation",
+    "error": "Error loading prediction"
+  },
+  "export": {
+    "button": "Export",
+    "exporting": "Exporting...",
+    "csv": "CSV",
+    "json": "JSON",
+    "date": "Date",
+    "predictedVisitors": "Predicted Visitor Count"
+  },
+  "header": {
+    "title": "Techmania Dashboard",
+    "notifications": "View notifications",
+    "userMenu": "Open user menu",
+    "profile": "Profile",
+    "logout": "Sign out"
+  },
+  "errors": {
+    "title": "Error",
+    "subtitle": "Something went wrong",
+    "description": "We're sorry, but an unexpected error occurred. Please try again.",
+    "tryAgain": "Try Again",
+    "goHome": "Home",
+    "notFoundTitle": "Page not found",
+    "notFoundDescription": "Sorry, the page you are looking for does not exist.",
+    "backToHome": "Back to Home"
+  },
+  "health": {
+    "checking": "Checking connection...",
+    "connected": "API Connected",
+    "disconnected": "API Unavailable",
+    "features": "features"
+  }
+}
