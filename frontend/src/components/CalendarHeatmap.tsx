@@ -3,21 +3,35 @@
 import { useEffect, useState } from 'react';
 import { api } from '@/lib/api';
 import type { CalendarHeatmapData } from '@/types/api';
+import { useTranslations } from '@/lib/i18n';
 
 interface CalendarHeatmapProps {
-  year?: number;
+  defaultYear?: number;
 }
 
-export default function CalendarHeatmap({ year = new Date().getFullYear() }: CalendarHeatmapProps) {
+export default function CalendarHeatmap({ defaultYear = 2025 }: CalendarHeatmapProps) {
+  const t = useTranslations('analytics.calendarHeatmap');
   const [data, setData] = useState<CalendarHeatmapData[]>([]);
+  const [availableYears, setAvailableYears] = useState<number[]>([]);
+  const [selectedYear, setSelectedYear] = useState<number>(defaultYear);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     const fetchData = async () => {
       try {
-        const heatmapData = await api.getCalendarHeatmapData(year);
-        setData(heatmapData);
+        // Načíst data bez specifikace roku, abychom dostali všechny roky
+        const response = await fetch('http://localhost:8000/analytics/heatmap');
+        const result = await response.json();
+        
+        setData(result.data || []);
+        const years = result.available_years || [];
+        setAvailableYears(years);
+        
+        // Nastavit poslední dostupný rok jako výchozí
+        if (years.length > 0 && !defaultYear) {
+          setSelectedYear(years[years.length - 1]);
+        }
       } catch (err: any) {
         console.error('Failed to fetch heatmap data:', err);
         setError(err.message);
@@ -27,7 +41,7 @@ export default function CalendarHeatmap({ year = new Date().getFullYear() }: Cal
     };
 
     fetchData();
-  }, [year]);
+  }, []);
 
   if (loading) {
     return (
@@ -52,9 +66,12 @@ export default function CalendarHeatmap({ year = new Date().getFullYear() }: Cal
     );
   }
 
+  // Filtrovat data podle vybraného roku
+  const yearData = data.filter(d => new Date(d.date).getFullYear() === selectedYear);
+  
   // Seskupení dat podle měsíců
   const monthsData: { [key: string]: CalendarHeatmapData[] } = {};
-  data.forEach(d => {
+  yearData.forEach(d => {
     const date = new Date(d.date);
     const monthKey = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
     if (!monthsData[monthKey]) {
@@ -64,9 +81,9 @@ export default function CalendarHeatmap({ year = new Date().getFullYear() }: Cal
   });
 
   // Výpočet rozsahu pro barevnou škálu
-  const visitors = data.map(d => d.visitors);
-  const maxVisitors = Math.max(...visitors);
-  const minVisitors = Math.min(...visitors);
+  const visitors = yearData.map(d => d.visitors);
+  const maxVisitors = visitors.length > 0 ? Math.max(...visitors) : 0;
+  const minVisitors = visitors.length > 0 ? Math.min(...visitors) : 0;
 
   const getColor = (visitors: number) => {
     const normalized = (visitors - minVisitors) / (maxVisitors - minVisitors || 1);
@@ -83,11 +100,31 @@ export default function CalendarHeatmap({ year = new Date().getFullYear() }: Cal
 
   return (
     <div className="bg-white dark:bg-gray-800 shadow-sm ring-1 ring-gray-900/5 dark:ring-gray-700 sm:rounded-xl p-6">
-      <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">
-        Calendar Heatmap - Návštěvnost {year}
-      </h3>
+      <div className="flex items-center justify-between mb-6">
+        <h3 className="text-lg font-semibold text-gray-900 dark:text-white">
+          {t('title')}
+        </h3>
+        
+        {/* Year selector */}
+        <div className="flex items-center gap-3">
+          <label className="text-sm text-gray-600 dark:text-gray-400">
+            {t('year')}:
+          </label>
+          <select
+            value={selectedYear}
+            onChange={(e) => setSelectedYear(Number(e.target.value))}
+            className="px-4 py-2 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg text-sm font-medium text-gray-900 dark:text-white hover:bg-gray-50 dark:hover:bg-gray-600 focus:outline-none focus:ring-2 focus:ring-techmania-blue"
+          >
+            {availableYears.map(year => (
+              <option key={year} value={year}>
+                {year}
+              </option>
+            ))}
+          </select>
+        </div>
+      </div>
 
-      <div className="space-y-6 overflow-x-auto">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6 overflow-x-auto">
         {Object.entries(monthsData).map(([monthKey, monthData]) => {
           const [yearStr, monthStr] = monthKey.split('-');
           const monthIndex = parseInt(monthStr) - 1;
@@ -134,7 +171,7 @@ export default function CalendarHeatmap({ year = new Date().getFullYear() }: Cal
                             ? `${getColor(day.visitors)} border border-gray-300 dark:border-gray-600 cursor-pointer hover:ring-2 hover:ring-techmania-blue`
                             : 'bg-gray-50 dark:bg-gray-900'
                         }`}
-                        title={day ? `${day.date}: ${day.visitors.toLocaleString('cs-CZ')} návštěvníků` : ''}
+                        title={day ? `${day.date}: ${day.visitors.toLocaleString('cs-CZ')} ${t('visitorsCount')}` : ''}
                       >
                         {day && (
                           <div className="flex items-center justify-center h-full text-xs font-medium text-gray-700 dark:text-gray-300">
@@ -153,7 +190,7 @@ export default function CalendarHeatmap({ year = new Date().getFullYear() }: Cal
 
       {/* Legenda */}
       <div className="mt-6 flex items-center gap-2 text-xs text-gray-600 dark:text-gray-400">
-        <span>Méně</span>
+        <span>{t('less')}</span>
         <div className="flex gap-1">
           <div className="w-4 h-4 bg-blue-100 dark:bg-blue-900/20 rounded"></div>
           <div className="w-4 h-4 bg-blue-200 dark:bg-blue-800/40 rounded"></div>
@@ -161,7 +198,7 @@ export default function CalendarHeatmap({ year = new Date().getFullYear() }: Cal
           <div className="w-4 h-4 bg-blue-600 dark:bg-blue-500/80 rounded"></div>
           <div className="w-4 h-4 bg-blue-800 dark:bg-blue-400 rounded"></div>
         </div>
-        <span>Více</span>
+        <span>{t('more')}</span>
       </div>
     </div>
   );

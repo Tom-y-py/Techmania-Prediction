@@ -15,6 +15,7 @@ import {
 import { Line } from 'react-chartjs-2';
 import { api } from '@/lib/api';
 import type { HistoricalDataResponse } from '@/types/api';
+import { useTranslations } from '@/lib/i18n';
 
 ChartJS.register(
   CategoryScale,
@@ -28,6 +29,7 @@ ChartJS.register(
 );
 
 export default function TrendAnalysis() {
+  const t = useTranslations('analytics.trendAnalysis');
   const [data, setData] = useState<HistoricalDataResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -65,7 +67,7 @@ export default function TrendAnalysis() {
       <div className="bg-white dark:bg-gray-800 rounded-xl p-6">
         <div className="rounded-lg bg-yellow-50 dark:bg-yellow-900/20 p-4">
           <p className="text-sm text-yellow-800 dark:text-yellow-300">
-            {error || 'Žádná data k zobrazení'}
+            {error || t('noData')}
           </p>
         </div>
       </div>
@@ -98,7 +100,7 @@ export default function TrendAnalysis() {
     labels,
     datasets: [
       {
-        label: 'Denní návštěvnost',
+        label: t('dailyVisitors'),
         data: visitors,
         borderColor: 'rgba(0, 102, 204, 0.4)',
         backgroundColor: 'rgba(0, 102, 204, 0.1)',
@@ -108,7 +110,7 @@ export default function TrendAnalysis() {
         pointRadius: 0,
       },
       ...(showMovingAverage ? [{
-        label: '7-denní klouzavý průměr',
+        label: t('movingAverage7'),
         data: movingAvg,
         borderColor: 'rgb(255, 99, 132)',
         backgroundColor: 'rgba(255, 99, 132, 0.1)',
@@ -133,7 +135,7 @@ export default function TrendAnalysis() {
       },
       title: {
         display: true,
-        text: 'Dlouhodobý trend návštěvnosti',
+        text: t('longTermTrend'),
         font: {
           size: 16,
           weight: 'bold' as const,
@@ -173,13 +175,13 @@ export default function TrendAnalysis() {
     <div className="bg-white dark:bg-gray-800 shadow-sm ring-1 ring-gray-900/5 dark:ring-gray-700 sm:rounded-xl p-6">
       <div className="flex items-center justify-between mb-4">
         <h3 className="text-lg font-semibold text-gray-900 dark:text-white">
-          Analýza trendu
+          {t('title')}
         </h3>
         <button
           onClick={() => setShowMovingAverage(!showMovingAverage)}
           className="px-3 py-1.5 text-sm font-medium rounded-lg bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors"
         >
-          {showMovingAverage ? 'Skrýt' : 'Zobrazit'} klouzavý průměr
+          {showMovingAverage ? t('hideMovingAverage') : t('showMovingAverage')}
         </button>
       </div>
 
@@ -190,25 +192,25 @@ export default function TrendAnalysis() {
       {/* Statistiky */}
       <div className="mt-6 grid grid-cols-2 md:grid-cols-4 gap-4">
         <div className="bg-gray-50 dark:bg-gray-900 rounded-lg p-3">
-          <div className="text-xs text-gray-600 dark:text-gray-400">Průměr</div>
+          <div className="text-xs text-gray-600 dark:text-gray-400">{t('average')}</div>
           <div className="text-lg font-bold text-gray-900 dark:text-white">
             {avgVisitors.toLocaleString('cs-CZ', { maximumFractionDigits: 0 })}
           </div>
         </div>
         <div className="bg-gray-50 dark:bg-gray-900 rounded-lg p-3">
-          <div className="text-xs text-gray-600 dark:text-gray-400">Maximum</div>
+          <div className="text-xs text-gray-600 dark:text-gray-400">{t('maximum')}</div>
           <div className="text-lg font-bold text-gray-900 dark:text-white">
             {maxVisitors.toLocaleString('cs-CZ')}
           </div>
         </div>
         <div className="bg-gray-50 dark:bg-gray-900 rounded-lg p-3">
-          <div className="text-xs text-gray-600 dark:text-gray-400">Minimum</div>
+          <div className="text-xs text-gray-600 dark:text-gray-400">{t('minimum')}</div>
           <div className="text-lg font-bold text-gray-900 dark:text-white">
             {minVisitors.toLocaleString('cs-CZ')}
           </div>
         </div>
         <div className="bg-gray-50 dark:bg-gray-900 rounded-lg p-3">
-          <div className="text-xs text-gray-600 dark:text-gray-400">Trend</div>
+          <div className="text-xs text-gray-600 dark:text-gray-400">{t('trend')}</div>
           <div className={`text-lg font-bold ${trendPercentage > 0 ? 'text-green-600' : 'text-red-600'}`}>
             {trendPercentage > 0 ? '+' : ''}{trendPercentage.toFixed(1)}%
           </div>
