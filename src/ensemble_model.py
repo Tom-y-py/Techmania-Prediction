@@ -1,6 +1,6 @@
 """
 Ensemble Model - LightGBM + XGBoost + CatBoost
-Hlavní implementace pro trénování a kombinaci modelů
+OPTIMALIZOVANÁ verze pro MAE < 100
 """
 
 import pandas as pd
@@ -18,7 +18,13 @@ from pathlib import Path
 import warnings
 warnings.filterwarnings('ignore')
 
-from feature_engineering import create_features, split_data, get_feature_columns
+# POUŽÍT OPTIMALIZOVANÝ feature engineering
+try:
+    from feature_engineering_v3 import create_features, split_data, get_feature_columns
+    print("✅ Using OPTIMIZED feature engineering v3")
+except ImportError:
+    from feature_engineering import create_features, split_data, get_feature_columns
+    print("⚠️ Using original feature engineering")
 
 
 def train_lightgbm(X_train, y_train, X_val, y_val):
@@ -38,22 +44,22 @@ def train_lightgbm(X_train, y_train, X_val, y_val):
     print("🌳 Training LightGBM...")
     print("=" * 60)
     
-    # Parametry - optimalizováno pro weather features
-    # LightGBM je dobrý na zachycení komplexních interakcí mezi features
+    # Parametry 
+    # Silnější regularizace + optimalizace pro weather features
     params = {
         'objective': 'regression',
-        'metric': 'rmse',
+        'metric': 'mae',  # Změněno z rmse na mae - přímá optimalizace MAE!
         'boosting_type': 'gbdt',
-        'num_leaves': 31,  # Zvýšeno - více kapacity pro weather patterns
-        'learning_rate': 0.02,  # Nižší learning rate pro lepší generalizaci
-        'feature_fraction': 0.75,  # Střední hodnota - dostatek features ale i randomizace
-        'bagging_fraction': 0.75,
+        'num_leaves': 25,  # Sníženo - menší overfitting
+        'learning_rate': 0.015,  # Nižší learning rate
+        'feature_fraction': 0.7,  # Více randomizace
+        'bagging_fraction': 0.7,
         'bagging_freq': 5,
-        'max_depth': 7,  # Zvýšeno - weather interakce mohou být komplexní
-        'min_child_samples': 25,  # Balancovaná hodnota
-        'reg_alpha': 0.3,  # Střední L1 regularizace
-        'reg_lambda': 0.3,  # Střední L2 regularizace
-        'min_split_gain': 0.01,  # Minimální zisk pro split - redukce noise
+        'max_depth': 6,  # Sníženo - menší overfitting
+        'min_child_samples': 30,  # Zvýšeno - více robustní
+        'reg_alpha': 1.0,  # SILNĚJŠÍ L1 regularizace (z 0.3)
+        'reg_lambda': 1.0,  # SILNĚJŠÍ L2 regularizace (z 0.3)
+        'min_split_gain': 0.05,  # Vyšší - méně splits
         'verbose': -1,
         'random_state': 42
     }
@@ -116,21 +122,21 @@ def train_xgboost(X_train, y_train, X_val, y_val):
     print("� Training XGBoost...")
     print("=" * 60)
     
-    # Parametry - XGBoost s jinou strategií než LightGBM pro diverzitu
-    # XGBoost používá jiný algoritmus pro split finding = jiné chyby než LightGBM
+    # Parametry 
+    # XGBoost s jinou strategií + silnější regularizace
     params = {
-        'objective': 'reg:squarederror',
-        'eval_metric': 'rmse',
-        'max_depth': 8,  # Hlubší stromy než LightGBM - jiná struktura
-        'learning_rate': 0.015,  # Ještě nižší než LightGBM
-        'subsample': 0.8,  # Více dat než LightGBM
-        'colsample_bytree': 0.6,  # Méně features - větší randomizace
-        'colsample_bylevel': 0.8,  # Další rozměr randomizace
-        'min_child_weight': 3,  # Nižší než LightGBM - jiné chování
-        'gamma': 0.1,  # Nižší než před tím - umožní více splits
-        'reg_alpha': 0.2,  # Nižší L1 než LightGBM
-        'reg_lambda': 0.8,  # Vyšší L2 než LightGBM - jiný typ regularizace
-        'random_state': 43,  # JINÝ seed = jiná randomizace = diverzita!
+        'objective': 'reg:absoluteerror',  # Změněno na MAE optimalizaci!
+        'eval_metric': 'mae',
+        'max_depth': 6,  # Sníženo (z 8)
+        'learning_rate': 0.01,  # Nižší (z 0.015)
+        'subsample': 0.75,  # Sníženo
+        'colsample_bytree': 0.6,
+        'colsample_bylevel': 0.75,
+        'min_child_weight': 5,  # Zvýšeno (z 3)
+        'gamma': 0.2,  # Zvýšeno
+        'reg_alpha': 1.5,  # SILNĚJŠÍ (z 0.2)
+        'reg_lambda': 1.5,  # SILNĚJŠÍ (z 0.8)
+        'random_state': 43,
         'n_jobs': -1,
         'verbosity': 0
     }
@@ -192,22 +198,23 @@ def train_catboost(X_train, y_train, X_val, y_val):
     print("🐱 Training CatBoost...")
     print("=" * 60)
     
-    # Model - CatBoost s native categorical handling
-    # CatBoost je speciálně dobrý pro kategorické features (weather_code, atd.)
+    # Model 
+    # CatBoost s silnější regularizací
     model = CatBoostRegressor(
         iterations=2000,
-        learning_rate=0.025,  # Mezi LightGBM a XGBoost
-        depth=8,  # Hlubší - CatBoost dobře zvládá hloubku
-        l2_leaf_reg=3,  # Nižší než před tím
-        random_strength=0.5,  # Více randomizace pro diverzitu
-        bagging_temperature=0.8,  # Vyšší - agresivnější bagging
-        rsm=0.7,  # Random subspace method - náhodný výběr features
+        learning_rate=0.02,  # Sníženo (z 0.025)
+        depth=6,  # Sníženo (z 8)
+        l2_leaf_reg=5,  # Zvýšeno (z 3)
+        random_strength=0.7,  # Zvýšeno
+        bagging_temperature=1.0,  # Zvýšeno
+        rsm=0.65,  # Sníženo
         od_type='Iter',
         od_wait=100,
-        random_seed=44,  # JINÝ seed než ostatní modely!
+        random_seed=44,
         verbose=100,
         task_type='CPU',
-        bootstrap_type='Bayesian'  # Jiný typ bagging než gradient boosting
+        bootstrap_type='Bayesian',
+        loss_function='MAE'  
     )
     
     # Trénování
@@ -517,9 +524,21 @@ def main():
     # Připravit X, y
     feature_cols = get_feature_columns(df)
     
-    X_train = train[feature_cols]
+    # FILTROVAT pouze numerické features (odstranit object dtypes)
+    numeric_features = []
+    for col in feature_cols:
+        if col in df.columns:
+            if df[col].dtype in ['int64', 'float64', 'bool', 'int32', 'float32']:
+                numeric_features.append(col)
+            elif df[col].dtype == 'uint8':  # Některé boolean features
+                numeric_features.append(col)
+    
+    print(f"\n📋 Feature columns ({len(numeric_features)} numeric features):")
+    print(f"  {', '.join(numeric_features[:15])}... (+{len(numeric_features)-15} more)")
+    
+    X_train = train[numeric_features]
     y_train = train['total_visitors']
-    X_val = val[feature_cols]
+    X_val = val[numeric_features]
     y_val = val['total_visitors']
     
     # === DŮLEŽITÉ: Normalizace dominantního feature 'is_closed' ===

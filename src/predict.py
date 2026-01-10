@@ -15,7 +15,8 @@ warnings.filterwarnings('ignore')
 # Přidat app do path pro weather service
 sys.path.append(str(Path(__file__).parent.parent / 'app'))
 
-from feature_engineering import create_features
+# Použít NOVÝ feature engineering v3!
+from feature_engineering_v3 import create_features
 try:
     from services import weather_service, holiday_service
     SERVICES_AVAILABLE = True
@@ -38,36 +39,26 @@ def load_models():
         import os
         models_dir = os.path.join(os.path.dirname(__file__), '..', 'models')
         
+        # Načíst V3 modely (s event features, Optuna tuning, atd.)
         models = {
-            'lgb': joblib.load(os.path.join(models_dir, 'lightgbm_model.pkl')),
-            'xgb': joblib.load(os.path.join(models_dir, 'xgboost_model.pkl')),
-            'cat': joblib.load(os.path.join(models_dir, 'catboost_model.pkl')),
-            'weights': joblib.load(os.path.join(models_dir, 'ensemble_weights.pkl')),
-            'feature_cols': joblib.load(os.path.join(models_dir, 'feature_columns.pkl'))
+            'lgb': joblib.load(os.path.join(models_dir, 'lightgbm_v3.pkl')),
+            'xgb': joblib.load(os.path.join(models_dir, 'xgboost_v3.pkl')),
+            'cat': joblib.load(os.path.join(models_dir, 'catboost_v3.pkl')),
+            'weights': joblib.load(os.path.join(models_dir, 'ensemble_weights_v3.pkl')),
+            'feature_cols': joblib.load(os.path.join(models_dir, 'feature_names_v3.pkl')),
+            'google_trend_predictor': joblib.load(os.path.join(models_dir, 'google_trend_predictor_v3.pkl')),
+            'historical_mae': joblib.load(os.path.join(models_dir, 'historical_mae_v3.pkl'))
         }
         
-        # Načíst informaci o typu ensemble (nové modely)
-        ensemble_info_path = os.path.join(models_dir, 'ensemble_info.pkl')
-        if os.path.exists(ensemble_info_path):
-            ensemble_info = joblib.load(ensemble_info_path)
-            models['ensemble_type'] = ensemble_info.get('type', 'weighted')
-            
-            if ensemble_info['type'] == 'stacking':
-                models['meta_model'] = joblib.load(os.path.join(models_dir, 'meta_model.pkl'))
-                print(f"✅ Models loaded successfully! (Ensemble: STACKING)")
-            elif ensemble_info['type'] == 'single_lgb':
-                print(f"✅ Models loaded successfully! (Using: SINGLE LightGBM - ensemble didn't improve)")
-            else:
-                print(f"✅ Models loaded successfully! (Ensemble: WEIGHTED)")
-        else:
-            # Starší modely bez ensemble_info = weighted ensemble
-            models['ensemble_type'] = 'weighted'
-            print(f"✅ Models loaded successfully! (Ensemble: WEIGHTED - legacy)")
+        # V3 používá vždy weighted ensemble
+        models['ensemble_type'] = 'weighted'
+        print(f"✅ Models V3 loaded successfully! (Ensemble: WEIGHTED - 3 models)")
+        print(f"   Historical MAE - Weekday: {models['historical_mae']['weekday']:.2f}, Weekend: {models['historical_mae']['weekend']:.2f}")
         
         return models
     except FileNotFoundError as e:
         print(f"❌ Error: {e}")
-        print("   Please train the models first by running: python src/ensemble_model.py")
+        print("   Please train the V3 models first by running: python src/ensemble_model_v3.py")
         return None
 
 
@@ -311,18 +302,35 @@ def predict_single_date(date, models_dict, historical_df=None):
             # Pokud holiday API selže, ponecháme prázdné hodnoty (NaN se doplní později)
             holiday_data = {}
     
-    new_row = pd.DataFrame({
-        'date': [date],
-        'total_visitors': [np.nan],
-        'school_visitors': [np.nan],
-        'public_visitors': [np.nan],
-        'extra': [None],
-        'opening_hours': [None],
-        **{k: [v] for k, v in weather_data.items()},
-        **{k: [v] for k, v in holiday_data.items()}
-    })
+    # OPRAVENO: Zkontrolovat, zda datum již existuje v DataFrame (template)
+    date_exists = (df['date'] == pd.to_datetime(date)).any()
     
-    df = pd.concat([df, new_row], ignore_index=True)
+    if date_exists:
+        # Datum existuje v template - aktualizovat pouze weather data
+        print(f"   ✓ Using template data for {date}")
+        date_idx = df[df['date'] == pd.to_datetime(date)].index[0]
+        # Aktualizovat weather data v existujícím řádku
+        for k, v in weather_data.items():
+            if k in df.columns:
+                df.loc[date_idx, k] = v
+        # Aktualizovat holiday data (přepsat template hodnoty novými z API)
+        for k, v in holiday_data.items():
+            if k in df.columns:
+                df.loc[date_idx, k] = v
+    else:
+        # Datum neexistuje - vytvořit nový řádek
+        print(f"   ⚠️ Date {date} not in template, creating new row")
+        new_row = pd.DataFrame({
+            'date': [date],
+            'total_visitors': [np.nan],
+            'school_visitors': [np.nan],
+            'public_visitors': [np.nan],
+            'extra': [None],
+            'opening_hours': [None],
+            **{k: [v] for k, v in weather_data.items()},
+            **{k: [v] for k, v in holiday_data.items()}
+        })
+        df = pd.concat([df, new_row], ignore_index=True)
     
     # Feature engineering
     df = create_features(df)
@@ -357,6 +365,47 @@ def predict_single_date(date, models_dict, historical_df=None):
     if missing_features:
         raise ValueError(f"Chybějící nezbytné feature sloupce pro predikci (bez fallbacku): {', '.join(missing_features)}")
     
+    # === KONVERZE NA NUMERIC (fix pro V3 features) ===
+    # V3 vytváří některé features jako object, musíme je převést na numeric
+    for col in X_pred.columns:
+        if X_pred[col].dtype == 'object':
+            X_pred[col] = pd.to_numeric(X_pred[col], errors='coerce')
+    
+    # Fill any remaining NaN after conversion
+    X_pred = X_pred.fillna(0)
+    
+    # === GOOGLE TREND PREDICTION (Improvement #5) ===
+    # Predikovat Google Trend zvlášť a přidat jako feature
+    google_trend_predictor = models_dict.get('google_trend_predictor')
+    if google_trend_predictor is not None:
+        # Google Trend predictor používá pouze časové/cyklické features (dle ensemble_model_v3.py řádek 70-75)
+        trend_features = [
+            'year', 'month', 'day_of_week', 'week_of_year', 'quarter',
+            'is_weekend', 'is_summer_holiday', 'is_winter_holiday', 'is_school_year',
+            'is_oct_28', 'is_autumn_break', 'is_summer_weekend_event', 'event_score',
+            'day_of_week_sin', 'day_of_week_cos', 'month_sin', 'month_cos',
+            'week_sin', 'week_cos', 'normalized_time'
+        ]
+        
+        # DŮLEŽITÉ: Tyto features nejsou v feature_cols (byly odstraněny při trénování),
+        # takže je musíme vzít přímo z df (před filtrováním)
+        pred_row_full = df[df['date'] == date]
+        available_trend_features = [f for f in trend_features if f in pred_row_full.columns]
+        
+        X_trend = pred_row_full[available_trend_features]
+        # Konvertovat na numeric (může obsahovat object types)
+        for col in X_trend.columns:
+            if X_trend[col].dtype == 'object':
+                X_trend[col] = pd.to_numeric(X_trend[col], errors='coerce')
+        X_trend = X_trend.fillna(0)
+        
+        predicted_trend = google_trend_predictor.predict(X_trend.values)[0]
+        X_pred['predicted_google_trend'] = predicted_trend
+    else:
+        # Fallback pokud predictor není dostupný
+        print(f"   Fallback: Google Trend predictor not available, using default value 50.0")
+        X_pred['predicted_google_trend'] = X_pred.get('google_trend', 50.0)
+    
     # === Predikce z každého modelu ===
     
     # 1. LightGBM
@@ -373,10 +422,23 @@ def predict_single_date(date, models_dict, historical_df=None):
     
     # 3. CatBoost
     cat_model = models_dict['cat']
+    
+    # DEBUG: Vypsat prvních 10 features pro debugging
+    debug_features = X_pred.iloc[0].head(15).to_dict()
+    print(f"   DEBUG: First 15 features for CatBoost:")
+    for k, v in debug_features.items():
+        print(f"      {k}: {v}")
+    
     cat_pred = cat_model.predict(X_pred)[0]
+    print(f"   DEBUG: CatBoost raw prediction: {cat_pred}")
     
     # === Ensemble - podle typu ===
     ensemble_type = models_dict.get('ensemble_type', 'weighted')
+    
+    # IMPROVEMENT: Zjistit, zda je víkend nebo svátek (CatBoost funguje lépe na tyto dny)
+    is_weekend = X_pred['is_weekend'].iloc[0] == 1
+    is_holiday = X_pred['is_holiday'].iloc[0] == 1
+    use_catboost = is_weekend or is_holiday
     
     if ensemble_type == 'single_lgb':
         # SINGLE: Použít pouze LightGBM (ensemble nepomohl)
@@ -387,21 +449,105 @@ def predict_single_date(date, models_dict, historical_df=None):
         meta_features = np.array([[lgb_pred, xgb_pred, cat_pred]])
         ensemble_pred = meta_model.predict(meta_features)[0]
     else:
-        # WEIGHTED: Použít váhy
+        # WEIGHTED: Použít váhy (V3 má dict s klíči 'LightGBM', 'XGBoost', 'CatBoost')
         weights = models_dict['weights']
-        ensemble_pred = (
-            weights[0] * lgb_pred +
-            weights[1] * xgb_pred +
-            weights[2] * cat_pred
-        )
+        
+        if isinstance(weights, dict):
+            # V3 format: dict s klíči modelů
+            
+            # IMPROVEMENT: CatBoost jen pro víkendy/svátky (systematicky přestřeluje všední dny)
+            if use_catboost:
+                # Víkend/svátek: použít všechny 3 modely
+                ensemble_pred = (
+                    weights.get('LightGBM', 0.33) * lgb_pred +
+                    weights.get('XGBoost', 0.33) * xgb_pred +
+                    weights.get('CatBoost', 0.34) * cat_pred
+                )
+            else:
+                # Všední den: jen LightGBM + XGBoost (přenormalizovat váhy)
+                w_lgb = weights.get('LightGBM', 0.5)
+                w_xgb = weights.get('XGBoost', 0.5)
+                w_sum = w_lgb + w_xgb
+                
+                if w_sum > 0:
+                    ensemble_pred = (
+                        (w_lgb / w_sum) * lgb_pred +
+                        (w_xgb / w_sum) * xgb_pred
+                    )
+                else:
+                    # Fallback: rovnoměrné váhy
+                    print("USING fallback for weight for CatBoost")
+                    ensemble_pred = 0.5 * lgb_pred + 0.5 * xgb_pred
+        else:
+            # Starý format: list/array
+            if use_catboost:
+                ensemble_pred = (
+                    weights[0] * lgb_pred +
+                    weights[1] * xgb_pred +
+                    weights[2] * cat_pred
+                )
+            else:
+                # Jen LightGBM + XGBoost
+                w_sum = weights[0] + weights[1]
+                ensemble_pred = (
+                    (weights[0] / w_sum) * lgb_pred +
+                    (weights[1] / w_sum) * xgb_pred
+                )
     
     # Zaokrouhlit na celé číslo
     ensemble_pred = int(round(max(ensemble_pred, 0)))
     
-    # Confidence interval (aproximace z variance modelů)
-    model_std = np.std([lgb_pred, xgb_pred, cat_pred])
-    confidence_lower = int(max(0, ensemble_pred - 1.96 * model_std))
-    confidence_upper = int(ensemble_pred + 1.96 * model_std)
+    # Confidence interval z historických reziduí (IMPROVEMENT: realističtější než variance modelů)
+    historical_mae = models_dict.get('historical_mae', None)
+    
+    if historical_mae is not None:
+        # Zjistit, zda je víkend nebo všední den
+        is_weekend = X_pred['is_weekend'].iloc[0] == 1
+        is_holiday = X_pred['is_holiday'].iloc[0] == 1
+        
+        # Použít odpovídající MAE (víkendy + svátky mají jiné chování)
+        if is_weekend or is_holiday:
+            mae = historical_mae['weekend']
+        else:
+            mae = historical_mae['weekday']
+        
+        # CI = predikce ± 1.96 * MAE (95% confidence interval)
+        # Dolní mez minimálně 50 (Techmania nikdy nebude úplně prázdná)
+        confidence_lower = int(max(50, ensemble_pred - 1.96 * mae))
+        confidence_upper = int(ensemble_pred + 1.96 * mae)
+    else:
+        # Fallback na starou metodu (variance modelů) pokud historical_mae není dostupná
+        model_std = np.std([lgb_pred, xgb_pred, cat_pred])
+        confidence_lower = int(max(50, ensemble_pred - 1.96 * model_std))
+        confidence_upper = int(ensemble_pred + 1.96 * model_std)
+    
+    # Vypočítat efektivní váhy (s přihlédnutím k selektivnímu použití CatBoost)
+    if isinstance(weights, dict):
+        if use_catboost:
+            effective_weights = {
+                'lightgbm': float(weights.get('LightGBM', 0.33)),
+                'xgboost': float(weights.get('XGBoost', 0.33)),
+                'catboost': float(weights.get('CatBoost', 0.34))
+            }
+        else:
+            # CatBoost nepoužit, přenormalizovat
+            w_lgb = weights.get('LightGBM', 0.5)
+            w_xgb = weights.get('XGBoost', 0.5)
+            w_sum = w_lgb + w_xgb
+            if w_sum > 0:
+                effective_weights = {
+                    'lightgbm': float(w_lgb / w_sum),
+                    'xgboost': float(w_xgb / w_sum),
+                    'catboost': 0.0
+                }
+            else:
+                effective_weights = {'lightgbm': 0.5, 'xgboost': 0.5, 'catboost': 0.0}
+    else:
+        effective_weights = {
+            'lightgbm': float(weights[0] if isinstance(weights, (list, np.ndarray)) else 0.33),
+            'xgboost': float(weights[1] if isinstance(weights, (list, np.ndarray)) else 0.33),
+            'catboost': float(weights[2] if isinstance(weights, (list, np.ndarray)) else 0.34)
+        }
     
     result = {
         'date': date,
@@ -409,16 +555,13 @@ def predict_single_date(date, models_dict, historical_df=None):
         'ensemble_prediction': ensemble_pred,
         'ensemble_type': ensemble_type,
         'confidence_interval': (confidence_lower, confidence_upper),
+        'catboost_used': use_catboost,  # IMPROVEMENT: Info o použití CatBoost
         'individual_predictions': {
             'lightgbm': int(round(lgb_pred)),
             'xgboost': int(round(xgb_pred)),
             'catboost': int(round(cat_pred))
         },
-        'model_weights': {
-            'lightgbm': float(models_dict['weights'][0]),
-            'xgboost': float(models_dict['weights'][1]),
-            'catboost': float(models_dict['weights'][2])
-        },
+        'model_weights': effective_weights,
         'weather': {
             'description': weather_description or 'N/A',
             'temperature': weather_data['temperature_mean'],
@@ -686,13 +829,22 @@ def predict_date_range(start_date, end_date, models_dict):
         meta_features = np.column_stack([lgb_preds, xgb_preds, cat_preds])
         ensemble_preds = meta_model.predict(meta_features)
     else:
-        # WEIGHTED: Použít váhy
+        # WEIGHTED: Použít váhy (V3 má dict, starší verze list)
         weights = models_dict['weights']
-        ensemble_preds = (
-            weights[0] * lgb_preds +
-            weights[1] * xgb_preds +
-            weights[2] * cat_preds
-        )
+        if isinstance(weights, dict):
+            # V3 format
+            ensemble_preds = (
+                weights.get('LightGBM', 0.33) * lgb_preds +
+                weights.get('XGBoost', 0.33) * xgb_preds +
+                weights.get('CatBoost', 0.34) * cat_preds
+            )
+        else:
+            # Starý format
+            ensemble_preds = (
+                weights[0] * lgb_preds +
+                weights[1] * xgb_preds +
+                weights[2] * cat_preds
+            )
     
     # Sestavit výsledky
     results = []
@@ -731,10 +883,13 @@ def print_prediction(result):
     print(f"\n🎯 ENSEMBLE PREDIKCE: {result['ensemble_prediction']} návštěvníků")
     print(f"   95% Confidence Interval: [{result['confidence_interval'][0]} - {result['confidence_interval'][1]}]")
     
+    # Info o použití CatBoost
+    catboost_status = "ACTIVE" if result.get('catboost_used', True) else "DISABLED (weekday)"
+    
     print(f"\n📊 Jednotlivé modely:")
     print(f"   LightGBM (váha {result['model_weights']['lightgbm']:.1%}): {result['individual_predictions']['lightgbm']} návštěvníků")
     print(f"   XGBoost (váha {result['model_weights']['xgboost']:.1%}): {result['individual_predictions']['xgboost']} návštěvníků")
-    print(f"   CatBoost (váha {result['model_weights']['catboost']:.1%}): {result['individual_predictions']['catboost']} návštěvníků")
+    print(f"   CatBoost (váha {result['model_weights']['catboost']:.1%}, {catboost_status}): {result['individual_predictions']['catboost']} návštěvníků")
     
     print("=" * 60)
 

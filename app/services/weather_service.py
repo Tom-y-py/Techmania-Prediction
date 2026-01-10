@@ -330,10 +330,9 @@ class WeatherService:
         return pd.DataFrame(weather_data)
 
 
-# Globální instance s inicializací cesty k historickým datům
-from pathlib import Path as PathlibPath
-_weather_data_path = PathlibPath(__file__).parent.parent.parent / 'data' / 'external' / 'weather_data.csv'
-weather_service = WeatherService(historical_data_path=str(_weather_data_path))
+# Globální instance bez historických dat (používáme Open-Meteo API)
+# Pro rychlost můžeme API volat přímo - Archive API je zdarma od roku 1940
+weather_service = WeatherService(historical_data_path=None)
 
 
 if __name__ == '__main__':

@@ -1,6 +1,8 @@
 """
 Feature Engineering pro Ensemble Model
 Vytváří všechny potřebné features pro predikci návštěvnosti Techmanie
+
+DEPRICATED
 """
 
 import pandas as pd
@@ -86,6 +88,42 @@ def create_features(df: pd.DataFrame) -> pd.DataFrame:
             df['is_holiday'] = df['extra'].notna().astype(int)
         else:
             df['is_holiday'] = 0
+    
+    # === FEATURES PRO DETEKCI ZAVŘENÝCH DNŮ ===
+    print("  ✓ Detekce pravděpodobně zavřených dní")
+    
+    # 1. Pondělky mimo léto (51.7% je zavřeno - VELMI SILNÝ SIGNÁL!)
+    df['is_monday_not_summer'] = (
+        (df['day_of_week'] == 0) &  # Pondělí
+        (~df['month'].isin([7, 8]))  # Není léto
+    ).astype(int)
+    
+    # 2. Vánoční období (24-26.12) - VŽDY zavřeno
+    df['is_christmas_closure'] = (
+        (df['month'] == 12) & 
+        (df['day'].isin([24, 25, 26]))
+    ).astype(int)
+    
+    # 3. Silvestr a Nový rok
+    df['is_new_year_period'] = (
+        ((df['month'] == 12) & (df['day'] == 31)) |  # Silvester
+        ((df['month'] == 1) & (df['day'] == 1))       # Nový rok
+    ).astype(int)
+    
+    # 4. Kombinovaný "risk of closure" score
+    # Čím vyšší, tím vyšší pravděpodobnost zavření
+    df['closure_risk_score'] = (
+        df['is_christmas_closure'] * 100 +        # Vánoce = 100% riziko
+        df['is_new_year_period'] * 80 +           # Silvester/Nový rok = 80%
+        df['is_monday_not_summer'] * 50 +         # Pondělí mimo léto = 50%
+        (df['is_holiday'] * df['day_of_week'] == 0).astype(int) * 30  # Svátek v pondělí = +30
+    )
+    
+    # 5. Interakce: Pondělí × zimní měsíce (ještě vyšší riziko zavření)
+    df['monday_winter'] = (
+        (df['day_of_week'] == 0) & 
+        (df['month'].isin([11, 12, 1, 2]))  # Zima
+    ).astype(int)
     
     # === DERIVED FEATURES ===
     print("  ✓ Odvozené features")

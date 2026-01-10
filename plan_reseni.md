@@ -433,25 +433,37 @@ AVERAGE/day                 471
 - unemployment_rate        # Míra nezaměstnanosti (%)
 
 
-Missing:
-"apparent_temp_max, apparent_temp_min, apparent_temp_mean  # Pokud nejsou v API
-wind_direction                                            # Pokud není v API  
-sunshine_duration, daylight_duration, sunshine_ratio     # Pokud nejsou v API
-cloud_cover_percent                                       # Pokud není v API
-feels_like_delta                                          # Odvozený feature
-weather_forecast_confidence                               # Odvozený feature
-temperature_trend_3d                                      # Potřebuje 3 dny historie
-is_weather_improving                                      # Potřebuje 3 dny historie
-20. precipitation_probability   → Weather API MÁ jen pro forecast, CHYBÍ pro archive
-24. apparent_temp_max           → Možná chybí v API → doplní se z historie nebo NaN→0
-25. apparent_temp_min           → Možná chybí v API → doplní se z historie nebo NaN→0
-26. apparent_temp_mean          → Možná chybí v API → doplní se z historie nebo NaN→0
-34. wind_direction              → Možná chybí v API → doplní se z historie nebo NaN→0
-35. sunshine_duration           → Možná chybí v API → doplní se z historie nebo NaN→0
-36. daylight_duration           → Možná chybí v API → doplní se z historie nebo NaN→0
-37. cloud_cover_percent         → Možná chybí v API → doplní se z historie nebo NaN→0
-42. sunshine_ratio              → Odvozený (sunshine/daylight) - pokud chybí data → NaN→0
-43. feels_like_delta            → Odvozený (apparent - real temp) - pokud chybí data → 0
-44. weather_forecast_confidence → Odvozený (1.0 pro historii, klesá pro forecast) - počítá weather_service
-45. temperature_trend_3d        → Odvozený (potřebuje 3 dny dat) - pokud chybí → 0
-46. is_weather_improving        → Odvozený (potřebuje 3 dny dat) - pokud chybí → 0" 
+======================================================================
+🎯 VÝSLEDKY PRO 11.01.2026 (Sunday)
+======================================================================
+
+📊 ENSEMBLE PREDIKCE: 344 návštěvníků
+   95% Confidence Interval: [50 - 641]
+   CI šířka: 591 (užší = přesnější)
+
+🤖 JEDNOTLIVÉ MODELY:
+   LightGBM: 327 návštěvníků
+     Váha: 63.4%
+   XGBoost: 372 návštěvníků
+     Váha: 36.6%
+   CatBoost: 382 návštěvníků
+     Váha: 0.0%
+     Status: ✅ ACTIVE
+
+🌤️ POČASÍ:
+   Popis: Zataženo
+   Teplota: -9.9°C
+   Srážky: 0.0mm
+
+======================================================================
+✅ OVĚŘENÍ IMPLEMENTACE
+======================================================================
+❌ Test 1: CHYBA - CatBoost by měl být VYPNUTÝ pro pátek (není víkend/svátek)!
+✅ Test 2: Součet vah LightGBM + XGBoost = 1.000 (OK)
+✅ Test 3: Dolní mez CI = 50 (>= 50)
+✅ Test 4: Ensemble (344) je mezi LightGBM (327) a XGBoost (372)
+
+======================================================================
+✅ TEST DOKONČEN!
+======================================================================
+(venv) PS D:\sebik_programovani\Techmania\src> 
