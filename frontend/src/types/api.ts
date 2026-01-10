@@ -14,6 +14,7 @@ export interface WeatherInfo {
 export interface HolidayInfo {
   is_holiday: boolean;
   holiday_name: string | null;
+  school_vacation?: string | null;
 }
 
 export interface PredictionResponse {
@@ -169,4 +170,20 @@ export interface PredictionHistorySummary {
 export interface PredictionHistoryResponse {
   history: PredictionHistoryItem[];
   summary: PredictionHistorySummary;
+}
+
+// Typy pro kalendář událostí
+export interface CalendarEvent {
+  date: string;
+  name: string;
+  type: 'holiday' | 'vacation' | 'event' | 'high_traffic';
+  predicted_visitors?: number;
+  day_of_week?: string;
+}
+
+export interface CalendarEventsResponse {
+  events: CalendarEvent[];
+  month: number;
+  year: number;
+  total_events: number;
 }

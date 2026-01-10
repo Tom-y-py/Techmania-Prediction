@@ -8,3 +8,6 @@ export { default as CalendarHeatmap } from './CalendarHeatmap';
 export { default as SeasonalityChart } from './SeasonalityChart';
 export { default as CorrelationAnalysis } from './CorrelationAnalysis';
 export { default as TrendAnalysis } from './TrendAnalysis';
+export { default as AlertsPanel } from './AlertsPanel';
+export { default as EventsCalendar } from './EventsCalendar';
+export { default as UpcomingEvents } from './UpcomingEvents';

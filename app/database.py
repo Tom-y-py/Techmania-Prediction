@@ -125,6 +125,7 @@ class TemplateData(Base):
     public_visitors = Column(Float, nullable=True)
     total_visitors = Column(Float, nullable=True)  # Nullable until completed
     extra = Column(String, nullable=True)
+    opening_hours = Column(String, nullable=True)
     
     # Calendar features - Basic
     is_weekend = Column(Integer)

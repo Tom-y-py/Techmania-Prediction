@@ -4,7 +4,8 @@
     "predictions": "Predikce",
     "analytics": "Analýza",
     "information": "Informace",
-    "settings": "Nastavení"
+    "settings": "Nastavení",
+    "calendar": "Kalendář"
   },
   "dashboard": {
     "title": "Dashboard Návštěvnosti",
@@ -275,6 +276,12 @@
   "header": {
     "title": "Techmania Dashboard",
     "notifications": "Zobrazit notifikace",
+    "notificationsTitle": "Upozornění",
+    "markAllRead": "Označit jako přečtené",
+    "noNotifications": "Žádná upozornění",
+    "viewCalendar": "Zobrazit kalendář",
+    "highAttendance": "Vysoká návštěvnost",
+    "niceWeather": "Pěkné počasí",
     "userMenu": "Otevřít uživatelské menu",
     "profile": "Profil",
     "logout": "Odhlásit se"
@@ -294,5 +301,45 @@
     "connected": "API připojeno",
     "disconnected": "API nedostupné",
     "features": "features"
+  },
+  "alerts": {
+    "title": "Upozornění a Insights",
+    "noAlerts": "Žádná nová upozornění",
+    "active": "aktivních",
+    "highVisitors": "Vysoká návštěvnost očekávána",
+    "upcomingHoliday": "Nadcházející svátek",
+    "niceWeather": "Pěkné počasí",
+    "predictionAccurate": "Predikce přesné",
+    "predictionInaccurate": "Nižší přesnost predikcí",
+    "weekendForecast": "Víkendová předpověď",
+    "errorLoading": "Chyba při načítání",
+    "errorLoadingAlerts": "Nepodařilo se načíst upozornění",
+    "last7Days": "Za posledních 7 dní",
+    "accuracyWithin10": "predikcí bylo v rozmezí ±10%",
+    "expectedTotal": "Očekávaný celkový počet",
+    "visitors": "návštěvníků"
+  },
+  "upcomingEvents": {
+    "title": "Nadcházející události",
+    "viewAll": "Zobrazit vše",
+    "noEvents": "Žádné nadcházející události",
+    "highTraffic": "Vysoká návštěvnost",
+    "visitors": "návštěvníků",
+    "today": "Dnes",
+    "tomorrow": "Zítra",
+    "in": "Za",
+    "days": "dní"
+  },
+  "calendar": {
+    "title": "Kalendář událostí",
+    "pageTitle": "Kalendář událostí",
+    "pageSubtitle": "Přehled svátků, prázdnin a predikované návštěvnosti",
+    "today": "Dnes",
+    "holiday": "Svátek",
+    "vacation": "Prázdniny",
+    "event": "Událost",
+    "noEvents": "Žádné události",
+    "expectedVisitors": "Očekávaná návštěvnost",
+    "visitors": "návštěvníků"
   }
 }

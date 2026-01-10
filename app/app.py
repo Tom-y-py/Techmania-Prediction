@@ -646,6 +646,145 @@ async def get_historical_data(days: int = 30):
         raise HTTPException(status_code=500, detail=f"Chyba při načítání dat: {str(e)}")
 
 
+# Pydantic modely pro kalendář
+class CalendarEvent(BaseModel):
+    date: str
+    name: str
+    type: str  # holiday, vacation, high_traffic
+    predicted_visitors: Optional[int] = None
+    day_of_week: Optional[str] = None
+
+
+class CalendarEventsResponse(BaseModel):
+    events: List[CalendarEvent]
+    month: int
+    year: int
+    total_events: int
+
+
+@app.get("/calendar/events", response_model=CalendarEventsResponse, tags=["Calendar"])
+async def get_calendar_events(month: int = None, year: int = None):
+    """
+    Získá události (svátky, prázdniny) pro daný měsíc.
+    Pokud month/year nejsou zadány, použije aktuální měsíc.
+    """
+    from datetime import date as date_type
+    import calendar as cal_module
+    
+    # Default na aktuální měsíc
+    today = date_type.today()
+    if month is None:
+        month = today.month
+    if year is None:
+        year = today.year
+    
+    # Validace
+    if month < 1 or month > 12:
+        raise HTTPException(status_code=400, detail="Měsíc musí být mezi 1 a 12")
+    if year < 2020 or year > 2030:
+        raise HTTPException(status_code=400, detail="Rok musí být mezi 2020 a 2030")
+    
+    events = []
+    day_of_week_names = {
+        0: 'Pondělí', 1: 'Úterý', 2: 'Středa', 3: 'Čtvrtek',
+        4: 'Pátek', 5: 'Sobota', 6: 'Neděle'
+    }
+    vacation_names = {
+        'winter': 'Vánoční prázdniny',
+        'halfyear': 'Pololetní prázdniny',
+        'spring': 'Jarní prázdniny',
+        'easter': 'Velikonoční prázdniny',
+        'summer': 'Letní prázdniny',
+        'autumn': 'Podzimní prázdniny',
+    }
+    
+    try:
+        _, num_days = cal_module.monthrange(year, month)
+        
+        # Načíst data z databáze (TemplateData pro 2026)
+        if DATABASE_ENABLED:
+            db = next(get_db())
+            try:
+                start_str = f"{year}-{month:02d}-01"
+                end_str = f"{year}-{month:02d}-{num_days:02d}"
+                
+                template_records = db.query(TemplateData).filter(
+                    TemplateData.date >= start_str,
+                    TemplateData.date <= end_str
+                ).all()
+                
+                for record in template_records:
+                    record_date = date_type.fromisoformat(str(record.date))
+                    day_of_week = day_of_week_names.get(record_date.weekday(), '')
+                    
+                    # Svátky
+                    if record.is_holiday == 1 and record.nazvy_svatek:
+                        events.append(CalendarEvent(
+                            date=str(record.date),
+                            name=record.nazvy_svatek,
+                            type='holiday',
+                            day_of_week=day_of_week
+                        ))
+                    
+                    # Prázdniny
+                    if record.school_break_type and record.school_break_type.strip():
+                        vacation_name = vacation_names.get(record.school_break_type, record.school_break_type)
+                        events.append(CalendarEvent(
+                            date=str(record.date),
+                            name=vacation_name,
+                            type='vacation',
+                            day_of_week=day_of_week
+                        ))
+                    
+                    # Extra události (pokud nejsou stejné jako svátek)
+                    if record.extra and record.extra.strip() and record.extra != record.nazvy_svatek:
+                        events.append(CalendarEvent(
+                            date=str(record.date),
+                            name=record.extra,
+                            type='event',
+                            day_of_week=day_of_week
+                        ))
+            finally:
+                db.close()
+        
+        # Fallback - použít holiday_service
+        if not events:
+            for day in range(1, num_days + 1):
+                current_date = date_type(year, month, day)
+                is_holiday, holiday_name = holiday_service.is_holiday(current_date)
+                
+                if is_holiday and holiday_name:
+                    events.append(CalendarEvent(
+                        date=current_date.isoformat(),
+                        name=holiday_name,
+                        type='holiday',
+                        day_of_week=day_of_week_names.get(current_date.weekday(), '')
+                    ))
+        
+        # Deduplikovat
+        seen = set()
+        unique_events = []
+        for event in events:
+            key = (event.date, event.type, event.name)
+            if key not in seen:
+                seen.add(key)
+                unique_events.append(event)
+        
+        unique_events.sort(key=lambda x: x.date)
+        
+        return CalendarEventsResponse(
+            events=unique_events,
+            month=month,
+            year=year,
+            total_events=len(unique_events)
+        )
+        
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Chyba při načítání událostí: {str(e)}")
+
+
 @app.post("/predict", response_model=PredictionResponse, tags=["Predictions"])
 async def predict(
     request: PredictionRequest,
