@@ -14,6 +14,7 @@ export interface WeatherInfo {
 export interface HolidayInfo {
   is_holiday: boolean;
   holiday_name: string | null;
+  school_vacation?: string | null;
 }
 
 export interface PredictionResponse {
@@ -94,4 +95,205 @@ export interface HistoricalDataResponse {
   start_date: string;
   end_date: string;
   total_days: number;
+}
+
+export interface TodayVisitorsResponse {
+  date: string;
+  current_visitors: number;
+  predicted_visitors: number;
+  difference: number;
+  percentage_difference: number;
+  last_updated: string;
+}
+
+export type TimeRange = 'daily' | 'weekly' | 'monthly' | 'quarterly' | 'yearly';
+
+export interface AggregatedDataPoint {
+  period: string;
+  visitors: number;
+  avg_visitors?: number;
+  min_visitors?: number;
+  max_visitors?: number;
+}
+
+export interface SeasonalityData {
+  by_weekday: { [key: string]: number };
+  by_month: { [key: string]: number };
+  by_hour?: { [key: string]: number };
+  holiday_vs_regular: {
+    holiday_avg: number;
+    regular_avg: number;
+    difference: number;
+  };
+}
+
+export interface CorrelationData {
+  weather_correlation: number;
+  temperature_correlation: number;
+  holiday_impact: number;
+  weekend_impact: number;
+}
+
+export interface CalendarHeatmapData {
+  date: string;
+  visitors: number;
+  day_of_week: number;
+  week_of_year: number;
+}
+
+// Typy pro historii predikcí
+export interface PredictionHistoryItem {
+  date: string;
+  predicted: number;
+  actual: number | null;
+  error: number | null;
+  error_percent: number | null;
+  version: number;
+  created_at: string | null;
+  confidence_lower: number | null;
+  confidence_upper: number | null;
+  within_confidence: boolean;
+  is_future: boolean;
+}
+
+export interface PredictionHistorySummary {
+  total_predictions: number;
+  valid_comparisons: number;
+  avg_error: number | null;
+  avg_error_percent: number | null;
+  predictions_within_10_percent: number;
+  predictions_within_20_percent: number;
+  accuracy_10_percent: number | null;
+  accuracy_20_percent: number | null;
+}
+
+export interface PredictionHistoryResponse {
+  history: PredictionHistoryItem[];
+  summary: PredictionHistorySummary;
+}
+
+// Typy pro kalendář událostí
+export interface CalendarEvent {
+  date: string;
+  name: string;
+  type: 'holiday' | 'vacation' | 'event' | 'high_traffic';
+  predicted_visitors?: number;
+  day_of_week?: string;
+}
+
+export interface CalendarEventsResponse {
+  events: CalendarEvent[];
+  month: number;
+  year: number;
+  total_events: number;
+}
+
+// Typy pro Events Management
+export interface EventResponse {
+  id: number;
+  event_date: string;
+  title: string;
+  description: string | null;
+  venue: string;
+  category: string;
+  expected_attendance: string;
+  source: string;
+  source_url: string | null;
+  impact_level: number;
+  is_active: boolean;
+  created_at: string;
+}
+
+export interface EventCreate {
+  event_date: string;
+  title: string;
+  description?: string | null;
+  venue?: string;
+  category?: string;
+  expected_attendance?: string;
+  impact_level?: number;
+}
+
+export interface EventUpdate {
+  title?: string;
+  description?: string | null;
+  venue?: string;
+  category?: string;
+  expected_attendance?: string;
+  impact_level?: number;
+  is_active?: boolean;
+}
+
+export interface EventsListResponse {
+  events: EventResponse[];
+  total_count: number;
+  date_range: {
+    start: string;
+    end: string;
+  } | null;
+}
+
+export interface ScraperRunRequest {
+  start_date: string;
+  end_date: string;
+  sources?: string[];
+}
+
+export interface ScraperRunResponse {
+  success: boolean;
+  message: string;
+  events_found: number;
+  events_saved: number;
+  date_range: {
+    start: string;
+    end: string;
+  };
+  sources_scraped: string[];
+}
+
+// Typy pro AI Chat
+export interface ChatMessage {
+  message: string;
+  history?: Array<{ role: string; content: string }>;
+}
+
+export interface ChatResponse {
+  response: string;
+  context_used: boolean;
+}
+
+// Typy pro Analytics - Correlation
+export interface CorrelationAnalysisResponse {
+  correlations: {
+    weather_correlation: number;
+    temperature_correlation: number;
+    holiday_impact: number;
+    weekend_impact: number;
+  };
+  description: string;
+}
+
+// Typy pro Analytics - Seasonality
+export interface SeasonalityAnalysisResponse {
+  by_weekday: Record<string, number>;
+  by_month: Record<string, number>;
+  holiday_vs_regular: {
+    holiday_avg: number;
+    regular_avg: number;
+    difference: number;
+  };
+}
+
+// Typy pro Analytics - Heatmap
+export interface HeatmapDataPoint {
+  date: string;
+  visitors: number;
+}
+
+export interface HeatmapResponse {
+  year?: number;
+  data: HeatmapDataPoint[];
+  min_visitors: number;
+  max_visitors: number;
+  available_years: number[];
 }

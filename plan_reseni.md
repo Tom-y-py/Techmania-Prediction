@@ -374,3 +374,96 @@ AVERAGE/day                 471
 ==============================================================================================================
 ✅ TESTING COMPLETE!
 ==============================================================================================================
+
+
+# Dostupné historicky i do budoucna DONE
+- is_school_break         # Jarní/podzimní prázdniny (1 týden)
+- days_to_holiday_start   # Kolik dní do začátku prázdnin
+- days_from_holiday_end   # Kolik dní od konce prázdnin
+- is_last_week_before_holiday  # Poslední týden před prázdninami
+- school_week_number      # Týden školního roku (1-40)
+
+# Lze vypočítat z data
+- is_bridge_day           # "Most" mezi svátkem a víkendem
+- long_weekend_length     # Délka prodlouženého víkendu (3-4 dny)
+- week_position           # Pozice v měsíci (1=první týden, 4=poslední)
+- is_month_end            # Konec měsíce (28-31)
+- season_exact            # Přesné roční období (1=zima, 2=jaro, 3=léto, 4=podzim)
+
+
+# Z weather API (open-meteo)
+- weather_forecast_confidence  # Spolehlivost předpovědi (0-1)
+- temperature_trend_3d         # Trend teploty za 3 dny
+- is_weather_improving         # Počasí se zlepšuje
+- uv_index                     # UV index (relevantní pro venkovní aktivity)
+- cloud_cover_percent          # Oblačnost v %
+- feels_like_delta             # Rozdíl pocitové vs skutečné teploty
+
+===========
+
+
+# Vyžaduje research, ale dostupné pro budoucnost
+- major_event_plzen       # Velká akce v Plzni (Pilsner Fest, Majáles, atd.)
+- is_big_exhibition       # Speciální výstava v Techmanii
+- nearby_attractions_open # Konkurenční atrakce otevřené (DinoParku, Zoo)
+- city_event_score        # Skóre událostí ve městě (1-10)
+
+# Dostupné historicky i prediktovatelné
+- fuel_price_czk          # Cena benzínu (ovlivňuje cestování)
+- is_payday_week          # Týden výplat (koreluje s výdaji na volný čas)
+- is_month_start          # Začátek měsíce (více peněz)
+- consumer_confidence     # Index spotřebitelské důvěry (měsíční)
+
+# Z Google Analytics / Facebook Insights
+- website_visitors_7d      # Návštěvníci webu za 7 dní
+- facebook_engagement      # Engagement na sociálních sítích
+- ad_campaign_active       # Běží marketingová kampaň (0/1)
+- google_search_volume     # Volume vyhledávání "techmania" (Google Trends)
+- instagram_reach          # Dosah na Instagramu
+
+# Z veřejných zdrojů
+- road_works_major         # Velké uzavírky silnic v Plzni (0/1)
+- public_transport_issues  # Problémy MHD/vlaky (0/1)
+- parking_price            # Cena parkování (Kč/h)
+- is_train_discount_valid  # Platí slevy na vlak (0/1)
+
+# Z ČSÚ (měsíční data)
+- school_age_population    # Počet dětí školního věku v kraji
+- tourism_index_plzen      # Index turistického ruchu v Plzni
+- unemployment_rate        # Míra nezaměstnanosti (%)
+
+
+======================================================================
+🎯 VÝSLEDKY PRO 11.01.2026 (Sunday)
+======================================================================
+
+📊 ENSEMBLE PREDIKCE: 344 návštěvníků
+   95% Confidence Interval: [50 - 641]
+   CI šířka: 591 (užší = přesnější)
+
+🤖 JEDNOTLIVÉ MODELY:
+   LightGBM: 327 návštěvníků
+     Váha: 63.4%
+   XGBoost: 372 návštěvníků
+     Váha: 36.6%
+   CatBoost: 382 návštěvníků
+     Váha: 0.0%
+     Status: ✅ ACTIVE
+
+🌤️ POČASÍ:
+   Popis: Zataženo
+   Teplota: -9.9°C
+   Srážky: 0.0mm
+
+======================================================================
+✅ OVĚŘENÍ IMPLEMENTACE
+======================================================================
+❌ Test 1: CHYBA - CatBoost by měl být VYPNUTÝ pro pátek (není víkend/svátek)!
+✅ Test 2: Součet vah LightGBM + XGBoost = 1.000 (OK)
+✅ Test 3: Dolní mez CI = 50 (>= 50)
+✅ Test 4: Ensemble (344) je mezi LightGBM (327) a XGBoost (372)
+
+======================================================================
+✅ TEST DOKONČEN!
+======================================================================
+(venv) PS D:\sebik_programovani\Techmania\src> 

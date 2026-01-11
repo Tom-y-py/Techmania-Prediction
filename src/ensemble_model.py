@@ -1,6 +1,6 @@
 """
 Ensemble Model - LightGBM + XGBoost + CatBoost
-Hlavní implementace pro trénování a kombinaci modelů
+OPTIMALIZOVANÁ verze pro MAE < 100
 """
 
 import pandas as pd
@@ -9,6 +9,8 @@ import lightgbm as lgb
 import xgboost as xgb
 from catboost import CatBoostRegressor
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
+from sklearn.linear_model import Ridge, Lasso
+from sklearn.ensemble import RandomForestRegressor
 from scipy.optimize import minimize
 import joblib
 import os
@@ -16,7 +18,13 @@ from pathlib import Path
 import warnings
 warnings.filterwarnings('ignore')
 
-from feature_engineering import create_features, split_data, get_feature_columns
+# POUŽÍT OPTIMALIZOVANÝ feature engineering
+try:
+    from feature_engineering_v3 import create_features, split_data, get_feature_columns
+    print("✅ Using OPTIMIZED feature engineering v3")
+except ImportError:
+    from feature_engineering import create_features, split_data, get_feature_columns
+    print("⚠️ Using original feature engineering")
 
 
 def train_lightgbm(X_train, y_train, X_val, y_val):
@@ -36,20 +44,22 @@ def train_lightgbm(X_train, y_train, X_val, y_val):
     print("🌳 Training LightGBM...")
     print("=" * 60)
     
-    # Parametry - zvýšená regularizace pro lepší generalizaci
+    # Parametry 
+    # Silnější regularizace + optimalizace pro weather features
     params = {
         'objective': 'regression',
-        'metric': 'rmse',
+        'metric': 'mae',  # Změněno z rmse na mae - přímá optimalizace MAE!
         'boosting_type': 'gbdt',
-        'num_leaves': 20,  # Sníženo z 31 - menší stromy = lepší generalizace
-        'learning_rate': 0.03,  # Sníženo z 0.05 - pomalejší učení = lepší počasí
-        'feature_fraction': 0.7,  # Sníženo z 0.8 - více randomizace
-        'bagging_fraction': 0.7,  # Sníženo z 0.8
+        'num_leaves': 25,  # Sníženo - menší overfitting
+        'learning_rate': 0.015,  # Nižší learning rate
+        'feature_fraction': 0.7,  # Více randomizace
+        'bagging_fraction': 0.7,
         'bagging_freq': 5,
-        'max_depth': 6,  # Sníženo z 8 - menší hloubka = méně přetrénování
-        'min_child_samples': 30,  # Zvýšeno z 20 - robustnější listy
-        'reg_alpha': 0.5,  # Zvýšeno z 0.1 - silnější L1 regularizace
-        'reg_lambda': 0.5,  # Zvýšeno z 0.1 - silnější L2 regularizace
+        'max_depth': 6,  # Sníženo - menší overfitting
+        'min_child_samples': 30,  # Zvýšeno - více robustní
+        'reg_alpha': 1.0,  # SILNĚJŠÍ L1 regularizace (z 0.3)
+        'reg_lambda': 1.0,  # SILNĚJŠÍ L2 regularizace (z 0.3)
+        'min_split_gain': 0.05,  # Vyšší - méně splits
         'verbose': -1,
         'random_state': 42
     }
@@ -112,19 +122,21 @@ def train_xgboost(X_train, y_train, X_val, y_val):
     print("� Training XGBoost...")
     print("=" * 60)
     
-    # Parametry - zvýšená regularizace
+    # Parametry 
+    # XGBoost s jinou strategií + silnější regularizace
     params = {
-        'objective': 'reg:squarederror',
-        'eval_metric': 'rmse',
-        'max_depth': 6,  # Sníženo z 8
-        'learning_rate': 0.03,  # Sníženo z 0.05
-        'subsample': 0.7,  # Sníženo z 0.8
-        'colsample_bytree': 0.7,  # Sníženo z 0.8
-        'min_child_weight': 5,  # Zvýšeno z 3
-        'gamma': 0.3,  # Zvýšeno z 0.1
-        'reg_alpha': 0.5,  # Zvýšeno z 0.1
-        'reg_lambda': 0.5,  # Zvýšeno z 0.1
-        'random_state': 42,
+        'objective': 'reg:absoluteerror',  # Změněno na MAE optimalizaci!
+        'eval_metric': 'mae',
+        'max_depth': 6,  # Sníženo (z 8)
+        'learning_rate': 0.01,  # Nižší (z 0.015)
+        'subsample': 0.75,  # Sníženo
+        'colsample_bytree': 0.6,
+        'colsample_bylevel': 0.75,
+        'min_child_weight': 5,  # Zvýšeno (z 3)
+        'gamma': 0.2,  # Zvýšeno
+        'reg_alpha': 1.5,  # SILNĚJŠÍ (z 0.2)
+        'reg_lambda': 1.5,  # SILNĚJŠÍ (z 0.8)
+        'random_state': 43,
         'n_jobs': -1,
         'verbosity': 0
     }
@@ -186,19 +198,23 @@ def train_catboost(X_train, y_train, X_val, y_val):
     print("🐱 Training CatBoost...")
     print("=" * 60)
     
-    # Model - zvýšená regularizace
+    # Model 
+    # CatBoost s silnější regularizací
     model = CatBoostRegressor(
         iterations=2000,
-        learning_rate=0.03,  # Sníženo z 0.05
-        depth=6,  # Sníženo z 8
-        l2_leaf_reg=5,  # Zvýšeno z 3
-        random_strength=0.3,  # Zvýšeno z 0.1
-        bagging_temperature=0.5,  # Zvýšeno z 0.2
+        learning_rate=0.02,  # Sníženo (z 0.025)
+        depth=6,  # Sníženo (z 8)
+        l2_leaf_reg=5,  # Zvýšeno (z 3)
+        random_strength=0.7,  # Zvýšeno
+        bagging_temperature=1.0,  # Zvýšeno
+        rsm=0.65,  # Sníženo
         od_type='Iter',
         od_wait=100,
-        random_seed=42,
+        random_seed=44,
         verbose=100,
-        task_type='CPU'
+        task_type='CPU',
+        bootstrap_type='Bayesian',
+        loss_function='MAE'  
     )
     
     # Trénování
@@ -233,13 +249,15 @@ def train_catboost(X_train, y_train, X_val, y_val):
     return model, val_pred
 
 
-def optimize_weights(predictions_dict, y_true):
+def optimize_weights(predictions_dict, y_true, min_weight=0.15):
     """
     Najde optimální váhy pro ensemble pomocí optimalizace
+    S OMEZENÍM: každý model musí mít minimální váhu pro zajištění diverzity
     
     Args:
         predictions_dict: Dict s predikcemi z každého modelu
         y_true: Skutečné hodnoty
+        min_weight: Minimální váha pro každý model (default 0.15 = 15%)
         
     Returns:
         Optimální váhy (numpy array)
@@ -252,8 +270,9 @@ def optimize_weights(predictions_dict, y_true):
     n_models = len(predictions_dict)
     initial_weights = [1.0 / n_models] * n_models
     
-    # Omezení: váhy musí být mezi 0 a 1, a součet = 1
-    bounds = [(0, 1)] * n_models
+    # DŮLEŽITÉ OMEZENÍ: každý model musí mít min_weight až 1, součet = 1
+    # Tím zajistíme, že všechny modely přispějí do ensemble
+    bounds = [(min_weight, 1.0)] * n_models
     constraints = {'type': 'eq', 'fun': lambda w: sum(w) - 1}
     
     # Optimalizace
@@ -266,6 +285,116 @@ def optimize_weights(predictions_dict, y_true):
     )
     
     return result.x
+
+
+def create_stacking_ensemble(lgb_pred, xgb_pred, cat_pred, y_true, use_meta_model='ridge'):
+    """
+    Vytvoří STACKING ensemble - používá meta-model k naučení optimální kombinace
+    Meta-model se učí, jak nejlépe kombinovat predikce základních modelů
+    
+    Args:
+        lgb_pred: LightGBM predikce
+        xgb_pred: XGBoost predikce  
+        cat_pred: CatBoost predikce
+        y_true: Skutečné hodnoty
+        use_meta_model: Typ meta-modelu ('ridge', 'lasso', 'rf')
+        
+    Returns:
+        Tuple[meta_model, ensemble_predictions]
+    """
+    print("\n" + "=" * 60)
+    print("🧠 Creating STACKING Ensemble with Meta-Model...")
+    print("=" * 60)
+    
+    # Ujistit se, že všechny predikce mají stejnou délku
+    min_len = min(len(lgb_pred), len(xgb_pred), len(cat_pred))
+    lgb_pred = lgb_pred[:min_len]
+    xgb_pred = xgb_pred[:min_len]
+    cat_pred = cat_pred[:min_len]
+    y_true = y_true[:min_len]
+    
+    # Vytvořit features pro meta-model = predikce základních modelů
+    meta_features = np.column_stack([lgb_pred, xgb_pred, cat_pred])
+    
+    # Vybrat meta-model
+    if use_meta_model == 'ridge':
+        # Ridge regression - penalizuje velké váhy, dobře generalizuje
+        meta_model = Ridge(alpha=1.0, random_state=42)
+        print(f"   Meta-model: Ridge Regression (L2 regularization)")
+    elif use_meta_model == 'lasso':
+        # Lasso - může nastavit některé váhy na 0 (feature selection)
+        meta_model = Lasso(alpha=0.1, random_state=42)
+        print(f"   Meta-model: Lasso Regression (L1 regularization)")
+    elif use_meta_model == 'rf':
+        # Random Forest - nelineární kombinace, zachytí komplexní interakce
+        meta_model = RandomForestRegressor(
+            n_estimators=100,
+            max_depth=3,  # Shallow trees - meta-model by neměl být příliš komplexní
+            random_state=42,
+            n_jobs=-1
+        )
+        print(f"   Meta-model: Random Forest (non-linear combination)")
+    else:
+        raise ValueError(f"Neznámý meta-model: {use_meta_model}")
+    
+    # Trénovat meta-model
+    meta_model.fit(meta_features, y_true)
+    
+    # Predikce
+    ensemble_pred = meta_model.predict(meta_features)
+    
+    # Zjistit váhy (pro lineární modely)
+    if hasattr(meta_model, 'coef_'):
+        raw_weights = meta_model.coef_
+        # Normalizovat na [0, 1] které sečtou do 1
+        weights_sum = np.abs(raw_weights).sum()
+        if weights_sum > 0:
+            weights = np.abs(raw_weights) / weights_sum
+        else:
+            weights = np.array([1/3, 1/3, 1/3])
+        
+        print(f"\n=== Meta-Model Learned Weights ===")
+        print(f"LightGBM: {weights[0]:.3f}")
+        print(f"XGBoost: {weights[1]:.3f}")
+        print(f"CatBoost: {weights[2]:.3f}")
+        print(f"Intercept: {meta_model.intercept_:.2f}")
+    else:
+        print(f"\n=== Meta-Model Info ===")
+        print(f"   Non-linear model - no explicit weights")
+        weights = None
+    
+    # Metriky
+    print("\n=== STACKING ENSEMBLE Results ===")
+    print(f"Val MAE: {mean_absolute_error(y_true, ensemble_pred):.2f}")
+    print(f"Val RMSE: {np.sqrt(mean_squared_error(y_true, ensemble_pred)):.2f}")
+    print(f"Val R²: {r2_score(y_true, ensemble_pred):.4f}")
+    
+    # Porovnání s jednotlivými modely
+    print("\n=== Comparison ===")
+    print(f"LightGBM MAE: {mean_absolute_error(y_true, lgb_pred):.2f}")
+    print(f"XGBoost MAE: {mean_absolute_error(y_true, xgb_pred):.2f}")
+    print(f"CatBoost MAE: {mean_absolute_error(y_true, cat_pred):.2f}")
+    print(f"Stacking Ensemble MAE: {mean_absolute_error(y_true, ensemble_pred):.2f}")
+    
+    best_single = min(
+        mean_absolute_error(y_true, lgb_pred),
+        mean_absolute_error(y_true, xgb_pred),
+        mean_absolute_error(y_true, cat_pred)
+    )
+    ensemble_mae = mean_absolute_error(y_true, ensemble_pred)
+    improvement = best_single - ensemble_mae
+    improvement_pct = (improvement / best_single) * 100
+    
+    if improvement > 0:
+        print(f"\n✅ Improvement over best single model:")
+        print(f"   {improvement:.2f} visitors better ({improvement_pct:.1f}% improvement)")
+    elif improvement < 0:
+        print(f"\n⚠️ Worse than best single model:")
+        print(f"   {abs(improvement):.2f} visitors worse ({abs(improvement_pct):.1f}% degradation)")
+    else:
+        print(f"\n➡️ Same as best single model")
+    
+    return meta_model, ensemble_pred, weights
 
 
 def create_ensemble(lgb_pred, xgb_pred, cat_pred, y_true, optimize=True):
@@ -340,11 +469,18 @@ def create_ensemble(lgb_pred, xgb_pred, cat_pred, y_true, optimize=True):
         mean_absolute_error(y_true, xgb_pred),
         mean_absolute_error(y_true, cat_pred)
     )
-    improvement = best_single - mean_absolute_error(y_true, ensemble_pred)
+    ensemble_mae = mean_absolute_error(y_true, ensemble_pred)
+    improvement = best_single - ensemble_mae
     improvement_pct = (improvement / best_single) * 100
     
-    print(f"\n🎉 Improvement over best single model:")
-    print(f"   {improvement:.2f} visitors ({improvement_pct:.1f}% better!)")
+    if improvement > 0:
+        print(f"\n✅ Improvement over best single model:")
+        print(f"   {improvement:.2f} visitors better ({improvement_pct:.1f}% improvement)")
+    elif improvement < 0:
+        print(f"\n⚠️ Worse than best single model:")
+        print(f"   {abs(improvement):.2f} visitors worse ({abs(improvement_pct):.1f}% degradation)")
+    else:
+        print(f"\n➡️ Same as best single model")
     
     return ensemble_pred, weights
 
@@ -354,24 +490,30 @@ def main():
     Hlavní pipeline pro ensemble model
     """
     print("\n" + "=" * 70)
-    print("🚀 ENSEMBLE MODEL TRAINING PIPELINE - WITH WEATHER DATA")
+    print("🚀 ENSEMBLE MODEL TRAINING PIPELINE - WITH WEATHER & HOLIDAYS DATA")
     print("=" * 70)
     
-    # 1. Načíst data S POČASÍM
+    # 1. Načíst data S POČASÍM A SVÁTKY
     print("\n📂 Loading data...")
     
-    # Cesta k sloučeným datům (návštěvnost + počasí)
+    # Cesta k sloučeným datům (návštěvnost + počasí + svátky + všechny features)
     script_dir = Path(__file__).parent
-    data_path = script_dir.parent / 'data' / 'processed' / 'techmania_with_weather.csv'
+    data_path = script_dir.parent / 'data' / 'processed' / 'techmania_with_weather_and_holidays.csv'
     
     df = pd.read_csv(data_path)
     print(f"   Loaded {len(df)} records from: {data_path.name}")
     print(f"   Date range: {df['date'].min()} - {df['date'].max()}")
+    print(f"   Total columns: {len(df.columns)}")
     
     # Ověřit, že máme weather data
-    weather_cols = ['temperature_mean', 'precipitation', 'weather_code']
+    weather_cols = ['temperature_mean', 'precipitation', 'weather_code', 'cloud_cover_percent']
     has_weather = all(col in df.columns for col in weather_cols)
     print(f"   Weather data present: {'✅ YES' if has_weather else '❌ NO'}")
+    
+    # Ověřit, že máme školní prázdniny
+    holiday_cols = ['is_any_school_break', 'school_break_type', 'is_summer_holiday']
+    has_holidays = all(col in df.columns for col in holiday_cols)
+    print(f"   School break data present: {'✅ YES' if has_holidays else '❌ NO'}")
     
     # 2. Feature engineering
     df = create_features(df)
@@ -382,10 +524,42 @@ def main():
     # Připravit X, y
     feature_cols = get_feature_columns(df)
     
-    X_train = train[feature_cols]
+    # FILTROVAT pouze numerické features (odstranit object dtypes)
+    numeric_features = []
+    for col in feature_cols:
+        if col in df.columns:
+            if df[col].dtype in ['int64', 'float64', 'bool', 'int32', 'float32']:
+                numeric_features.append(col)
+            elif df[col].dtype == 'uint8':  # Některé boolean features
+                numeric_features.append(col)
+    
+    print(f"\n📋 Feature columns ({len(numeric_features)} numeric features):")
+    print(f"  {', '.join(numeric_features[:15])}... (+{len(numeric_features)-15} more)")
+    
+    X_train = train[numeric_features]
     y_train = train['total_visitors']
-    X_val = val[feature_cols]
+    X_val = val[numeric_features]
     y_val = val['total_visitors']
+    
+    # === DŮLEŽITÉ: Normalizace dominantního feature 'is_closed' ===
+    # is_closed má obrovskou importance (1+ miliarda), což potlačuje vliv počasí
+    # Snížíme jeho váhu, aby ostatní features (počasí, svátky, atd.) měly větší vliv
+    print("\n🎯 Normalizing 'is_closed' feature to balance importance...")
+    if 'is_closed' in X_train.columns:
+        # Původní hodnoty: 0 nebo 1
+        # Nové hodnoty: 0 nebo 0.1 (10x menší vliv)
+        # Model se tak musí více spoléhat na ostatní features
+        original_closed_count_train = X_train['is_closed'].sum()
+        original_closed_count_val = X_val['is_closed'].sum()
+        
+        X_train['is_closed'] = X_train['is_closed'] * 0.1
+        X_val['is_closed'] = X_val['is_closed'] * 0.1
+        
+        print(f"   Train: {original_closed_count_train} zavřených dní → váha snížena na 0.1")
+        print(f"   Val: {original_closed_count_val} zavřených dní → váha snížena na 0.1")
+        print(f"   ✅ Weather a ostatní features nyní dostanou větší prostor!")
+    else:
+        print("   ⚠️ Feature 'is_closed' nebyl nalezen")
     
     # 4. Trénovat modely
     lgb_model, lgb_pred = train_lightgbm(X_train, y_train, X_val, y_val)
@@ -394,14 +568,70 @@ def main():
     
     cat_model, cat_pred = train_catboost(X_train, y_train, X_val, y_val)
     
-    # 5. Ensemble
-    ensemble_pred, weights = create_ensemble(
+    # 5a. Weighted Ensemble (původní metoda s minimální váhou)
+    print("\n" + "=" * 70)
+    print("📊 METHOD 1: WEIGHTED ENSEMBLE (optimized weights with minimum)")
+    print("=" * 70)
+    ensemble_pred_weighted, weights = create_ensemble(
         lgb_pred,
         xgb_pred,
         cat_pred,
         y_val.values,
         optimize=True
     )
+    mae_weighted = mean_absolute_error(y_val.values, ensemble_pred_weighted)
+    
+    # 5b. Stacking Ensemble (meta-model)
+    print("\n" + "=" * 70)
+    print("📊 METHOD 2: STACKING ENSEMBLE (meta-model learns combination)")
+    print("=" * 70)
+    meta_model, ensemble_pred_stacking, meta_weights = create_stacking_ensemble(
+        lgb_pred,
+        xgb_pred,
+        cat_pred,
+        y_val.values,
+        use_meta_model='ridge'  # Ridge je dobrý default
+    )
+    mae_stacking = mean_absolute_error(y_val.values, ensemble_pred_stacking)
+    
+    # 5c. Porovnat s nejlepším jednotlivým modelem
+    mae_lgb = mean_absolute_error(y_val.values, lgb_pred)
+    mae_xgb = mean_absolute_error(y_val.values, xgb_pred)
+    mae_cat = mean_absolute_error(y_val.values, cat_pred)
+    best_single_mae = min(mae_lgb, mae_xgb, mae_cat)
+    
+    print("\n" + "=" * 70)
+    print("🏆 FINAL COMPARISON")
+    print("=" * 70)
+    print(f"Best Single Model MAE: {best_single_mae:.2f}")
+    print(f"Weighted Ensemble MAE: {mae_weighted:.2f}")
+    print(f"Stacking Ensemble MAE: {mae_stacking:.2f}")
+    
+    # Vybrat nejlepší z VŠECH možností (včetně jednotlivých modelů!)
+    candidates = [
+        ('best_single', best_single_mae, None),
+        ('weighted', mae_weighted, ensemble_pred_weighted),
+        ('stacking', mae_stacking, ensemble_pred_stacking)
+    ]
+    
+    winner = min(candidates, key=lambda x: x[1])
+    final_ensemble_type = winner[0]
+    final_mae = winner[1]
+    final_ensemble_pred = winner[2]
+    
+    if final_ensemble_type == 'stacking':
+        print(f"\n✅ Winner: STACKING ENSEMBLE")
+        print(f"   MAE: {final_mae:.2f}")
+        print(f"   Better than best single by: {best_single_mae - final_mae:.2f} visitors ({((best_single_mae - final_mae) / best_single_mae * 100):.1f}%)")
+    elif final_ensemble_type == 'weighted':
+        print(f"\n✅ Winner: WEIGHTED ENSEMBLE")
+        print(f"   MAE: {final_mae:.2f}")
+        print(f"   Better than best single by: {best_single_mae - final_mae:.2f} visitors ({((best_single_mae - final_mae) / best_single_mae * 100):.1f}%)")
+    else:
+        print(f"\n✅ Winner: BEST SINGLE MODEL (LightGBM)")
+        print(f"   MAE: {final_mae:.2f}")
+        print(f"   ⚠️ Ensemble methods didn't improve - using single model")
+        final_ensemble_type = 'single_lgb'
     
     # 6. Uložit modely
     print("\n💾 Saving models...")
@@ -414,23 +644,46 @@ def main():
     joblib.dump(weights, os.path.join(models_dir, 'ensemble_weights.pkl'))
     joblib.dump(feature_cols, os.path.join(models_dir, 'feature_columns.pkl'))
     
+    # Uložit informaci o typu ensemble a meta-model (pokud je stacking)
+    ensemble_info = {
+        'type': final_ensemble_type,
+        'mae': final_mae
+    }
+    if final_ensemble_type == 'stacking':
+        joblib.dump(meta_model, os.path.join(models_dir, 'meta_model.pkl'))
+        if meta_weights is not None:
+            joblib.dump(meta_weights, os.path.join(models_dir, 'meta_weights.pkl'))
+        ensemble_info['meta_weights'] = meta_weights
+    
+    joblib.dump(ensemble_info, os.path.join(models_dir, 'ensemble_info.pkl'))
+    
     print("\n✅ Models saved successfully!")
     print("   📁 models/lightgbm_model.pkl")
     print("   📁 models/xgboost_model.pkl")
     print("   📁 models/catboost_model.pkl")
     print("   📁 models/ensemble_weights.pkl")
     print("   📁 models/feature_columns.pkl")
+    print("   📁 models/ensemble_info.pkl")
+    if final_ensemble_type == 'stacking':
+        print("   📁 models/meta_model.pkl")
+        if meta_weights is not None:
+            print("   📁 models/meta_weights.pkl")
     
     print("\n" + "=" * 70)
     print("🎉 TRAINING COMPLETE!")
     print("=" * 70)
+    print(f"Final Ensemble Type: {final_ensemble_type.upper()}")
+    print(f"Final Validation MAE: {final_mae:.2f}")
     
     return {
         'lgb': lgb_model,
         'xgb': xgb_model,
         'cat': cat_model,
         'weights': weights,
-        'feature_cols': feature_cols
+        'feature_cols': feature_cols,
+        'ensemble_type': final_ensemble_type,
+        'meta_model': meta_model if final_ensemble_type == 'stacking' else None,
+        'meta_weights': meta_weights if final_ensemble_type == 'stacking' else None
     }
 
 

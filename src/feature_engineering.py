@@ -1,6 +1,8 @@
 """
 Feature Engineering pro Ensemble Model
 Vytváří všechny potřebné features pro predikci návštěvnosti Techmanie
+
+DEPRICATED
 """
 
 import pandas as pd
@@ -34,8 +36,9 @@ def create_features(df: pd.DataFrame) -> pd.DataFrame:
     df['quarter'] = df['date'].dt.quarter
     df['day_of_year'] = df['date'].dt.dayofyear
     
-    # Víkend
-    df['is_weekend'] = (df['day_of_week'] >= 5).astype(int)
+    # Víkend - pouze pokud už není v datech
+    if 'is_weekend' not in df.columns:
+        df['is_weekend'] = (df['day_of_week'] >= 5).astype(int)
     
     # === LAG FEATURES (historické hodnoty) - VYPNUTO PRO LEPŠÍ POČASÍ ===
     # Tyto features způsobují, že model ignoruje počasí, protože se spoléhá na historii
@@ -63,24 +66,64 @@ def create_features(df: pd.DataFrame) -> pd.DataFrame:
     
     # === SEZÓNNÍ FEATURES ===
     print("  ✓ Sezónní features (prázdniny, školní rok)")
-    # Letní prázdniny (červenec + srpen)
-    df['is_summer_holiday'] = df['month'].isin([7, 8]).astype(int)
+    # Letní prázdniny (červenec + srpen) - pouze pokud už není v datech
+    if 'is_summer_holiday' not in df.columns:
+        df['is_summer_holiday'] = df['month'].isin([7, 8]).astype(int)
     
     # Vánoční prázdniny (23.12 - 2.1)
-    df['is_winter_holiday'] = (
-        ((df['month'] == 12) & (df['day'] >= 23)) |
-        ((df['month'] == 1) & (df['day'] <= 2))
-    ).astype(int)
+    if 'is_winter_holiday' not in df.columns:
+        df['is_winter_holiday'] = (
+            ((df['month'] == 12) & (df['day'] >= 23)) |
+            ((df['month'] == 1) & (df['day'] <= 2))
+        ).astype(int)
     
     # Školní rok vs prázdniny
     df['is_school_year'] = (~df['month'].isin([7, 8])).astype(int)
     
     # === SVÁTKY (z extra sloupce) ===
     print("  ✓ Svátky")
-    if 'extra' in df.columns:
-        df['is_holiday'] = df['extra'].notna().astype(int)
-    else:
-        df['is_holiday'] = 0
+    # is_holiday už je v datech z CSV
+    if 'is_holiday' not in df.columns:
+        if 'extra' in df.columns:
+            df['is_holiday'] = df['extra'].notna().astype(int)
+        else:
+            df['is_holiday'] = 0
+    
+    # === FEATURES PRO DETEKCI ZAVŘENÝCH DNŮ ===
+    print("  ✓ Detekce pravděpodobně zavřených dní")
+    
+    # 1. Pondělky mimo léto (51.7% je zavřeno - VELMI SILNÝ SIGNÁL!)
+    df['is_monday_not_summer'] = (
+        (df['day_of_week'] == 0) &  # Pondělí
+        (~df['month'].isin([7, 8]))  # Není léto
+    ).astype(int)
+    
+    # 2. Vánoční období (24-26.12) - VŽDY zavřeno
+    df['is_christmas_closure'] = (
+        (df['month'] == 12) & 
+        (df['day'].isin([24, 25, 26]))
+    ).astype(int)
+    
+    # 3. Silvestr a Nový rok
+    df['is_new_year_period'] = (
+        ((df['month'] == 12) & (df['day'] == 31)) |  # Silvester
+        ((df['month'] == 1) & (df['day'] == 1))       # Nový rok
+    ).astype(int)
+    
+    # 4. Kombinovaný "risk of closure" score
+    # Čím vyšší, tím vyšší pravděpodobnost zavření
+    df['closure_risk_score'] = (
+        df['is_christmas_closure'] * 100 +        # Vánoce = 100% riziko
+        df['is_new_year_period'] * 80 +           # Silvester/Nový rok = 80%
+        df['is_monday_not_summer'] * 50 +         # Pondělí mimo léto = 50%
+        (df['is_holiday'] * df['day_of_week'] == 0).astype(int) * 30  # Svátek v pondělí = +30
+    )
+    
+    # 5. Interakce: Pondělí × zimní měsíce (ještě vyšší riziko zavření)
+    df['monday_winter'] = (
+        (df['day_of_week'] == 0) & 
+        (df['month'].isin([11, 12, 1, 2]))  # Zima
+    ).astype(int)
     
     # === DERIVED FEATURES ===
     print("  ✓ Odvozené features")
@@ -89,11 +132,6 @@ def create_features(df: pd.DataFrame) -> pd.DataFrame:
     # if 'school_visitors' in df.columns and 'public_visitors' in df.columns:
     #     df['school_ratio'] = df['school_visitors'] / (df['total_visitors'] + 1)
     #     df['public_ratio'] = df['public_visitors'] / (df['total_visitors'] + 1)
-    
-    # Otevírací doba v hodinách
-    if 'opening_hours' in df.columns:
-        # Konverze textových hodnot na čísla
-        df['is_closed'] = df['opening_hours'].fillna('').str.contains('zavřeno', case=False).astype(int)
     
     # Trend (lineární číslo dne)
     df['days_since_start'] = (df['date'] - df['date'].min()).dt.days
@@ -139,8 +177,17 @@ def create_features(df: pd.DataFrame) -> pd.DataFrame:
             # Mráz speciálně o víkendu (kdy by normálně bylo nejvíc lidí)
             df['weekend_cold_penalty'] = df['is_weekend'] * df['cold_penalty']
         
-        # Srážky × Víkend (déšť o víkendu je horší než v týdnu)
+        # Srážky × Víkend - ROZLIŠUJEME déšť vs sníh!
         if 'precipitation' in df.columns:
+            # Déšť o víkendu = lidé hledají vnitřní aktivity = MŮŽE BÝT BONUS
+            df['rain_x_weekend'] = (
+                (df['precipitation'] > 0).astype(int) * 
+                (df['temperature_mean'] > 5).astype(int) *  # Bezpečné teploty
+                df['is_weekend'] * 
+                (df['is_snowy'] == 0).astype(int)
+            )
+            
+            # Pro kompatibilitu (starý feature) - ale s menší váhou pro déšť
             df['precip_x_weekend'] = df['precipitation'] * df['is_weekend']
             df['precip_x_summer'] = df['precipitation'] * df['is_summer_holiday']
         
@@ -158,7 +205,7 @@ def create_features(df: pd.DataFrame) -> pd.DataFrame:
             # Kombinace mrazu a srážek/sněhu = katastrofa pro návštěvnost
             df['freezing_with_snow'] = (
                 (df['temperature_mean'] < 0).astype(int) * 
-                (df['is_snowy'] | (df['snowfall'] > 0)).astype(int)
+                ((df['is_snowy'] > 0) | (df['snowfall'] > 0)).astype(int)
             )
             
             df['freezing_with_precip'] = (
@@ -166,32 +213,65 @@ def create_features(df: pd.DataFrame) -> pd.DataFrame:
                 (df['precipitation'] > 0).astype(int)
             )
             
-            # Opravdu špatné počasí = zima + srážky (SILNĚJŠÍ penalizace)
-            df['bad_weather_score'] = (
-                (df['temperature_mean'] < 0).astype(int) * 5 +    # Mráz = 5 bodů! 
-                (df['temperature_mean'] < -5).astype(int) * 3 +   # Pod -5°C = +3 body
-                (df['temperature_mean'] < -10).astype(int) * 3 +  # Pod -10°C = +3 body
-                (df['precipitation'] > 5).astype(int) * 3 +       # Hodně srážek = 3 body
-                (df['precipitation'] > 0).astype(int) +           # Jakékoli srážky = 1 bod
-                df['is_snowy'] * 5 +                              # Sníh = 5 bodů (VELMI špatné)
-                (df['snowfall'] > 0).astype(int) * 3 +            # Sněžení = 3 body
-                df['is_windy'] * 2                                # Vítr = 2 body
+            # KLÍČOVÉ: Déšť vs Sníh - rozdílný efekt!
+            # Déšť (teplo) = lidé jdou dovnitř = BONUS pro Techmanii ✅
+            # Sníh (zima) = nebezpečné cesty = PENALIZACE ❌
+            df['rain_indoor_bonus'] = (
+                (df['temperature_mean'] > 5).astype(int) *  # Teplo = bezpečné cesty
+                (df['precipitation'] > 2).astype(int) *      # Hodně prší
+                (df['is_snowy'] == 0).astype(int)            # Není sníh
             )
             
-            # Mráz + sníh + víkend = EXTRÉMNÍ penalizace
+            # Špatné počasí score - ROZDÍLNÉ pro sníh vs déšť
+            df['bad_weather_score'] = (
+                # MRÁZ a SNÍH = velmi špatné (nebezpečné cesty, školy zavřené)
+                (df['temperature_mean'] < 0).astype(int) * 6 +       # Mráz = 6 bodů PENALIZACE
+                (df['temperature_mean'] < -5).astype(int) * 4 +      # Pod -5°C = +4 body
+                (df['temperature_mean'] < -10).astype(int) * 4 +     # Pod -10°C = +4 body
+                df['is_snowy'] * 8 +                                 # Sníh = 8 bodů! (NEJVĚTŠÍ penalizace)
+                (df['snowfall'] > 0).astype(int) * 5 +               # Sněžení = 5 bodů
+                
+                # DÉŠŤ (bez mrazu) = malá penalizace (jen nepohodlí, ale lidé stejně jedou)
+                (
+                    (df['temperature_mean'] >= 5).astype(int) *      # Bezpečné teploty
+                    (df['precipitation'] > 5).astype(int) *          # Hodně prší
+                    (df['is_snowy'] == 0).astype(int)                # Není sníh
+                ) * 1 +                                              # Jen 1 bod (téměř žádná penalizace)
+                
+                df['is_windy'] * 2                                   # Vítr = 2 body
+            )
+            
+            # Mráz + sníh + víkend = EXTRÉMNÍ penalizace (nikdo nejede)
             df['weekend_frozen_nightmare'] = (
                 df['is_weekend'] * 
                 (df['temperature_mean'] < 0).astype(int) * 
-                df['is_snowy']
+                df['is_snowy'] * 3  # Trojnásobek efektu!
             )
             
-            # Perfektní počasí pro návštěvu = teplo + sucho + víkend
+            # NOVÝ: Déšť + víkend = BONUS (lidé hledají vnitřní aktivity)
+            df['rainy_weekend_bonus'] = (
+                df['is_weekend'] * 
+                (df['temperature_mean'] > 5).astype(int) *  # Bezpečné teploty
+                (df['precipitation'] > 1).astype(int) *     # Prší
+                (df['is_snowy'] == 0).astype(int)           # Není sníh
+            )
+            
+            # Perfektní počasí pro návštěvu 
+            # POZOR: Hezké počasí o víkendu může být HORŠÍ (konkurence venkovních aktivit!)
             df['perfect_weather_score'] = (
                 (df['temperature_mean'] > 15).astype(int) * 2 +  # Teplo = 2 body
                 (df['temperature_mean'] > 20).astype(int) +       # Ještě tepleji = +1 bod
                 (df['precipitation'] == 0).astype(int) * 2 +      # Sucho = 2 body
                 df['is_nice_weather'] * 2 +                       # Hezké počasí = 2 body
                 df['is_weekend']                                   # Víkend = 1 bod
+            )
+            
+            # NOVÝ: Konkurence venkovních aktivit (hezké počasí o víkendu = méně lidí)
+            df['outdoor_competition'] = (
+                (df['temperature_mean'] > 18).astype(int) *  # Krásné teplo
+                (df['precipitation'] == 0).astype(int) *     # Sucho
+                df['is_weekend'] *                           # Víkend
+                (df['is_summer_holiday'] == 0).astype(int)   # Mimo hlavní prázdniny
             )
         
         # Tepelný komfort (ne moc horko, ne moc zima)
@@ -224,11 +304,18 @@ def split_data(
     """
     print(f"\n📊 Splitting data...")
     
+    # Vyplnit NaN hodnoty místo mazání řádků
     numeric_cols = df.select_dtypes(include=['int64', 'int32', 'float64', 'float32', 'bool', 'uint8']).columns
-    df_before = len(df)
-    df = df.dropna(subset=numeric_cols)
-    print(f"  Dropped {df_before - len(df)} rows with NaN in numeric features")
-    print(f"  Remaining data: {len(df)} rows ({df['date'].min()} - {df['date'].max()})")
+    nan_counts = df[numeric_cols].isna().sum()
+    cols_with_nan = nan_counts[nan_counts > 0]
+    
+    if len(cols_with_nan) > 0:
+        print(f"  Found NaN values in {len(cols_with_nan)} columns, filling with 0...")
+        for col in cols_with_nan.index:
+            print(f"    - {col}: {cols_with_nan[col]} NaN values")
+        df[numeric_cols] = df[numeric_cols].fillna(0)
+    
+    print(f"  Total data: {len(df)} rows ({df['date'].min()} - {df['date'].max()})")
     
     print(f"\n  Train period: до {train_end}")
     print(f"  Validation period: {train_end} - {val_end}")
@@ -262,10 +349,11 @@ def get_feature_columns(df: pd.DataFrame) -> list:
         'school_visitors',  # součást targetu
         'public_visitors',  # součást targetu
         'extra',  # text metadata
-        'opening_hours',  # text metadata
-        'day_of_week_str',  # pokud existuje textová verze
+        'day_of_week',  # textový název dne (pátek, sobota, ...)
         'nazvy_svatek',  # text názvy svátků
-        'day_of_week',  # textový název dne (pokud existuje)
+        'school_break_type',  # text typ prázdnin
+        'season_exact',  # text název sezóny
+        'week_position',  # text pozice v týdnu
     ]
     
     # Vybrat pouze sloupce, které nejsou v exclude_cols

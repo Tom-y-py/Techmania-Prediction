@@ -1,21 +1,19 @@
 'use client';
 
 import { useState } from 'react';
+import { usePathname } from 'next/navigation';
 import { Dialog } from '@headlessui/react';
 import { Bars3Icon, XMarkIcon } from '@heroicons/react/24/outline';
 import { 
   ChartBarIcon, 
   CalendarIcon, 
   HomeIcon,
-  Cog6ToothIcon
+  Cog6ToothIcon,
+  InformationCircleIcon,
+  SparklesIcon,
+  CheckBadgeIcon
 } from '@heroicons/react/24/solid';
-
-const navigation = [
-  { name: 'Dashboard', href: '#', icon: HomeIcon, current: true },
-  { name: 'Predikce', href: '#predictions', icon: CalendarIcon, current: false },
-  { name: 'Analýza', href: '#analytics', icon: ChartBarIcon, current: false },
-  { name: 'Nastavení', href: '#settings', icon: Cog6ToothIcon, current: false },
-];
+import { useTranslations } from '@/lib/i18n';
 
 function classNames(...classes: string[]) {
   return classes.filter(Boolean).join(' ');
@@ -23,6 +21,28 @@ function classNames(...classes: string[]) {
 
 export default function Sidebar() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const pathname = usePathname();
+  const t = useTranslations('common');
+
+  const navigation = [
+    { name: t('dashboard'), href: '/', icon: HomeIcon },
+    { name: t('calendar') || 'Kalendář', href: '/calendar', icon: CalendarIcon },
+    { name: t('analytics'), href: '/analytics', icon: ChartBarIcon },
+    { name: 'Události', href: '/events', icon: SparklesIcon },
+    { name: 'Přesnost predikcí', href: '/accuracy', icon: CheckBadgeIcon },
+    { name: t('information'), href: '/info', icon: InformationCircleIcon },
+    { name: t('settings'), href: '/settings', icon: Cog6ToothIcon },
+  ];
+
+  const isActive = (href: string) => {
+    if (href === '/') {
+      return pathname === '/';
+    }
+    if (href.startsWith('/#')) {
+      return pathname === '/';
+    }
+    return pathname === href;
+  };
 
   return (
     <>
@@ -37,7 +57,7 @@ export default function Sidebar() {
                 <XMarkIcon className="h-6 w-6 text-white" aria-hidden="true" />
               </button>
             </div>
-            <div className="flex grow flex-col gap-y-5 overflow-y-auto bg-white px-6 pb-2">
+            <div className="flex grow flex-col gap-y-5 overflow-y-auto bg-white dark:bg-gray-800 px-6 pb-2">
               <div className="flex h-16 shrink-0 items-center">
                 <h1 className="text-2xl font-bold text-techmania-blue">Techmania</h1>
               </div>
@@ -50,15 +70,15 @@ export default function Sidebar() {
                           <a
                             href={item.href}
                             className={classNames(
-                              item.current
-                                ? 'bg-gray-50 text-techmania-blue'
-                                : 'text-gray-700 hover:text-techmania-blue hover:bg-gray-50',
+                              isActive(item.href)
+                                ? 'bg-gray-50 dark:bg-gray-700 text-techmania-blue'
+                                : 'text-gray-700 dark:text-gray-300 hover:text-techmania-blue hover:bg-gray-50 dark:hover:bg-gray-700',
                               'group flex gap-x-3 rounded-md p-2 text-sm leading-6 font-semibold'
                             )}
                           >
                             <item.icon
                               className={classNames(
-                                item.current ? 'text-techmania-blue' : 'text-gray-400 group-hover:text-techmania-blue',
+                                isActive(item.href) ? 'text-techmania-blue' : 'text-gray-400 group-hover:text-techmania-blue',
                                 'h-6 w-6 shrink-0'
                               )}
                               aria-hidden="true"
@@ -78,7 +98,7 @@ export default function Sidebar() {
 
       {/* Static sidebar for desktop */}
       <div className="hidden lg:fixed lg:inset-y-0 lg:z-50 lg:flex lg:w-72 lg:flex-col">
-        <div className="flex grow flex-col gap-y-5 overflow-y-auto border-r border-gray-200 bg-white px-6">
+        <div className="flex grow flex-col gap-y-5 overflow-y-auto border-r border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 px-6">
           <div className="flex h-16 shrink-0 items-center">
             <h1 className="text-2xl font-bold text-techmania-blue">Techmania</h1>
           </div>
@@ -91,15 +111,15 @@ export default function Sidebar() {
                       <a
                         href={item.href}
                         className={classNames(
-                          item.current
-                            ? 'bg-gray-50 text-techmania-blue'
-                            : 'text-gray-700 hover:text-techmania-blue hover:bg-gray-50',
+                          isActive(item.href)
+                            ? 'bg-gray-50 dark:bg-gray-700 text-techmania-blue'
+                            : 'text-gray-700 dark:text-gray-300 hover:text-techmania-blue hover:bg-gray-50 dark:hover:bg-gray-700',
                           'group flex gap-x-3 rounded-md p-2 text-sm leading-6 font-semibold'
                         )}
                       >
                         <item.icon
                           className={classNames(
-                            item.current ? 'text-techmania-blue' : 'text-gray-400 group-hover:text-techmania-blue',
+                            isActive(item.href) ? 'text-techmania-blue' : 'text-gray-400 group-hover:text-techmania-blue',
                             'h-6 w-6 shrink-0'
                           )}
                           aria-hidden="true"
@@ -116,16 +136,16 @@ export default function Sidebar() {
       </div>
 
       {/* Mobile menu button */}
-      <div className="sticky top-0 z-40 flex items-center gap-x-6 bg-white px-4 py-4 shadow-sm sm:px-6 lg:hidden">
+      <div className="sticky top-0 z-40 flex items-center gap-x-6 bg-white dark:bg-gray-800 px-4 py-4 shadow-sm sm:px-6 lg:hidden">
         <button
           type="button"
-          className="-m-2.5 p-2.5 text-gray-700 lg:hidden"
+          className="-m-2.5 p-2.5 text-gray-700 dark:text-gray-300 lg:hidden"
           onClick={() => setSidebarOpen(true)}
         >
           <span className="sr-only">Otevřít sidebar</span>
           <Bars3Icon className="h-6 w-6" aria-hidden="true" />
         </button>
-        <div className="flex-1 text-sm font-semibold leading-6 text-gray-900">Dashboard</div>
+        <div className="flex-1 text-sm font-semibold leading-6 text-gray-900 dark:text-white">Dashboard</div>
       </div>
     </>
   );
