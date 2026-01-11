@@ -156,6 +156,10 @@ def add_google_trend_feature(
     
     # Získat trend features z plného DataFrame
     df_for_trend = df_full[df_full['date'].isin(pred_dates)]
+    
+    # Odstranit duplikáty - vzít pouze poslední výskyt každého data
+    df_for_trend = df_for_trend.drop_duplicates(subset=['date'], keep='last')
+    
     available_trend_features = [f for f in trend_features if f in df_for_trend.columns]
     
     if not available_trend_features:

@@ -1130,6 +1130,9 @@ async def predict_range(
 
         # Zavolat refaktorovaný predict_date_range
         results_df = predict_date_range(start_date, end_date, models_dict)
+        
+        # Odstranit duplikáty - vzít pouze první výskyt každého data
+        results_df = results_df.drop_duplicates(subset=['date'], keep='first')
 
         # Formátování výstupu
         predictions = []
@@ -1137,8 +1140,46 @@ async def predict_range(
             pred_date = row["date"].date()
             prediction_value = int(row["prediction"])
 
-            holiday_info_data = holiday_service.get_holiday_info(pred_date)
-            weather_data = weather_service.get_weather(pred_date)
+            # Pro backtest: načíst data z databáze, jinak ze služeb
+            if backtest and DATABASE_ENABLED and db is not None:
+                # Načíst historická data z databáze
+                hist_record = db.query(HistoricalData).filter(
+                    HistoricalData.date == pred_date
+                ).first()
+                
+                if hist_record:
+                    # Použít skutečná data z databáze
+                    holiday_name = hist_record.nazvy_svatek
+                    if holiday_name in [None, '', '0', 0]:
+                        holiday_name = None
+                    
+                    holiday_info_data = {
+                        "is_holiday": bool(hist_record.is_holiday),
+                        "holiday_name": holiday_name
+                    }
+                    
+                    # Interpretovat weather_code na popis
+                    weather_description = "N/A"
+                    if hist_record.weather_code is not None:
+                        weather_description = weather_service._interpret_weather_code(int(hist_record.weather_code))
+                    
+                    weather_data = {
+                        "temperature_mean": hist_record.temperature_mean or 0.0,
+                        "precipitation": hist_record.precipitation or 0.0,
+                        "weather_description": weather_description,
+                        "is_nice_weather": bool(hist_record.is_nice_weather) if hist_record.is_nice_weather is not None else False,
+                        "wind_speed_max": hist_record.wind_speed or 0.0,
+                        "is_rainy": bool(hist_record.is_rainy) if hist_record.is_rainy is not None else False,
+                        "is_snowy": bool(hist_record.is_snowy) if hist_record.is_snowy is not None else False,
+                    }
+                else:
+                    # Fallback na služby
+                    holiday_info_data = holiday_service.get_holiday_info(pred_date)
+                    weather_data = weather_service.get_weather(pred_date)
+            else:
+                # Budoucí predikce - použít služby
+                holiday_info_data = holiday_service.get_holiday_info(pred_date)
+                weather_data = weather_service.get_weather(pred_date)
 
             day_name = row["date"].strftime("%A")
             day_name_cs = {
@@ -1190,8 +1231,10 @@ async def predict_range(
                         created_by="api_range" if not backtest else "api_backtest",
                     )
                     db.add(db_prediction)
+                    db.flush()  # FIXED: Flush immediately to ensure next get_next_version() sees this record
                 except Exception as e:
                     print(f"⚠️ Failed to save prediction for {pred_date}: {e}")
+                    db.rollback()
         
         if DATABASE_ENABLED and db is not None:
             try:
@@ -1356,6 +1399,8 @@ async def get_predictions_history_range(
         start_date = end_date - timedelta(days=days)
 
         # Získat nejnovější verzi predikce pro každé datum v rozsahu
+        from sqlalchemy import func, desc
+        
         subquery = (
             db.query(
                 Prediction.prediction_date,
@@ -1374,16 +1419,29 @@ async def get_predictions_history_range(
                 (Prediction.prediction_date == subquery.c.prediction_date)
                 & (Prediction.version == subquery.c.max_version),
             )
-            .order_by(Prediction.prediction_date.asc())
+            .order_by(Prediction.prediction_date.asc(), Prediction.id.desc())
             .all()
         )
+        
+        # Deduplikovat podle prediction_date (vzít pouze první záznam pro každé datum)
+        seen_dates = set()
+        unique_predictions = []
+        for pred in predictions:
+            if pred.prediction_date not in seen_dates:
+                seen_dates.add(pred.prediction_date)
+                unique_predictions.append(pred)
+        
+        predictions = unique_predictions
 
         history = []
         for pred in predictions:
             pred_data = {
                 "date": pred.prediction_date.isoformat(),
-                "predicted_visitors": pred.predicted_visitors,
+                "predicted": pred.predicted_visitors,
+                "predicted_visitors": pred.predicted_visitors,  # Zpětná kompatibilita
                 "is_future": pred.prediction_date > date.today(),
+                "confidence_lower": pred.confidence_lower,
+                "confidence_upper": pred.confidence_upper,
                 "confidence_interval": {
                     "lower": pred.confidence_lower,
                     "upper": pred.confidence_upper,
@@ -1391,17 +1449,25 @@ async def get_predictions_history_range(
             }
 
             # Pokud máme historická data, přidat skutečnou návštěvnost
-            if include_metrics and pred.prediction_date < date.today():
+            if pred.prediction_date <= date.today():
                 historical = db.query(HistoricalData).filter(
                     HistoricalData.date == pred.prediction_date
                 ).first()
                 
-                if historical:
-                    pred_data["actual_visitors"] = historical.total_visitors
-                    pred_data["error"] = abs(pred.predicted_visitors - historical.total_visitors)
-                    pred_data["error_percentage"] = abs(
+                if historical and historical.total_visitors is not None:
+                    pred_data["actual_visitors"] = int(historical.total_visitors)
+                    error = abs(pred.predicted_visitors - historical.total_visitors)
+                    pred_data["error"] = int(error)
+                    pred_data["error_percentage"] = round(abs(
                         (pred.predicted_visitors - historical.total_visitors) / historical.total_visitors * 100
-                    ) if historical.total_visitors > 0 else 0
+                    ), 2) if historical.total_visitors > 0 else 0
+                    
+                    # Přidat metriky pouze pokud include_metrics
+                    if include_metrics:
+                        pred_data["accuracy_metrics"] = {
+                            "within_10_percent": pred_data["error_percentage"] <= 10,
+                            "within_20_percent": pred_data["error_percentage"] <= 20,
+                        }
 
             history.append(pred_data)
 

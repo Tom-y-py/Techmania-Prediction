@@ -273,6 +273,10 @@ def predict_date_range(
     
     # 4. Připravit features
     df_pred = df_combined[df_combined['date'].isin(date_range)].copy()
+    
+    # Odstranit duplikáty - vzít pouze poslední řádek pro každé datum
+    df_pred = df_pred.drop_duplicates(subset=['date'], keep='last')
+    
     X_pred = prepare_features_for_prediction(
         df_pred,
         models_dict['feature_cols'],
@@ -292,7 +296,7 @@ def predict_date_range(
         X_pred = add_google_trend_feature(
             X_pred,
             df_combined,
-            df_pred['date'],
+            df_pred['date'].reset_index(drop=True),
             models_dict['google_trend_predictor'],
             trend_features
         )

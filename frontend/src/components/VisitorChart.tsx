@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import {
   Chart as ChartJS,
   CategoryScale,
@@ -17,6 +17,7 @@ import { Chart } from 'react-chartjs-2';
 import { api } from '@/lib/api';
 import type { HistoricalDataResponse, TodayVisitorsResponse, TimeRange, RangePredictionResponse, PredictionHistoryResponse } from '@/types/api';
 import { useTranslations } from '@/lib/i18n';
+import { usePredictionUpdates } from '@/hooks/usePredictionUpdates';
 
 ChartJS.register(
   CategoryScale,
@@ -40,101 +41,111 @@ export default function VisitorChart() {
   const [error, setError] = useState<string | null>(null);
   const [timeRange, setTimeRange] = useState<'week' | 'month' | 'quarter' | 'year'>('month');
 
-  useEffect(() => {
-    const fetchData = async () => {
-      setLoading(true);
-      setError(null);
+  // Funkce pro načtení dat - použijeme useCallback aby byla stabilní pro hook
+  const fetchData = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      // Určíme kolik dní zpátky pro historii a predikci
+      const historyDaysMap = {
+        week: 7,
+        month: 30,
+        quarter: 90,
+        year: 365
+      };
+      
+      const daysBack = historyDaysMap[timeRange];
+      
+      // Načteme historická reálná data
+      const historical = await api.getHistoricalData(daysBack);
+      setHistoricalData(historical);
+      
+      // Pokusíme se načíst dnešní data (může selhat, není kritické)
       try {
-        // Určíme kolik dní zpátky pro historii a predikci
-        const historyDaysMap = {
-          week: 7,
-          month: 30,
-          quarter: 90,
-          year: 365
-        };
+        const today = await api.getTodayVisitors();
+        setTodayData(today);
+      } catch (todayErr) {
+        console.log('Today data not available:', todayErr);
+        setTodayData(null);
+      }
+      
+      // Načteme historii predikcí - VŠECHNY predikce pro daný rozsah včetně historických
+      // Backend automaticky počítá metriky a páruje s reálnými daty
+      try {
+        const history = await api.getPredictionHistory(daysBack, true);
+        console.log('Prediction history loaded:', history);
+        console.log('Total predictions:', history.history?.length || 0);
+        console.log('Past predictions with actual data:', 
+          history.history?.filter((p: any) => !p.is_future && p.actual_visitors !== undefined).length || 0
+        );
+        setPredictionHistory(history);
+      } catch (historyErr) {
+        console.log('Prediction history not available:', historyErr);
+        setPredictionHistory(null);
+      }
+      
+      // Načteme budoucí predikce (pouze od dneška dopředu)
+      try {
+        const savedPredictions = await api.getLatestPredictions(15);
         
-        // Načteme historická reálná data
-        const historical = await api.getHistoricalData(historyDaysMap[timeRange]);
-        setHistoricalData(historical);
+        // Filtrovat pouze budoucí predikce (od dneška)
+        const now = new Date();
+        now.setHours(0, 0, 0, 0);
         
-        // Pokusíme se načíst dnešní data (může selhat, není kritické)
-        try {
-          const today = await api.getTodayVisitors();
-          setTodayData(today);
-        } catch (todayErr) {
-          console.log('Today data not available:', todayErr);
-          setTodayData(null);
-        }
+        const futurePredictions = savedPredictions.predictions
+          .filter((pred: any) => {
+            const predDate = new Date(pred.date);
+            predDate.setHours(0, 0, 0, 0);
+            return predDate >= now;
+          })
+          .map((pred: any) => ({
+            date: pred.date,
+            predicted_visitors: pred.predicted_visitors,
+            confidence_interval: pred.confidence_interval,
+            day_of_week: new Date(pred.date).toLocaleDateString('cs-CZ', { weekday: 'long' }),
+            is_weekend: [0, 6].includes(new Date(pred.date).getDay()),
+            weather_info: {
+              temperature_mean: pred.temperature_mean || 0,
+              precipitation: pred.precipitation || 0,
+              is_nice_weather: pred.is_nice_weather || false,
+              weather_description: ''
+            },
+            holiday_info: {
+              is_holiday: false,
+              holiday_name: null
+            }
+          }));
         
-        // Načteme historii predikcí - porovnání predikce vs. realita
-        try {
-          const history = await api.getPredictionHistory(historyDaysMap[timeRange], true);
-          console.log('Prediction history loaded:', history);
-          console.log('Non-future predictions:', history.history.filter(p => !p.is_future).length);
-          setPredictionHistory(history);
-        } catch (historyErr) {
-          console.log('Prediction history not available:', historyErr);
-          setPredictionHistory(null);
-        }
-        
-        // Načteme predikci pouze od dneška dopředu
-        // DŮLEŽITÉ: Používáme uložené predikce z databáze, NEvoláme novou predikci!
-        // Nové predikce se vytváří pouze přes RangePredictionForm
-        try {
-          const savedPredictions = await api.getLatestPredictions(15);
-          
-          // Filtrovat pouze budoucí predikce (od dneška)
-          const now = new Date();
-          now.setHours(0, 0, 0, 0);
-          
-          const futurePredictions = savedPredictions.predictions
-            .filter((pred: any) => {
-              const predDate = new Date(pred.date);
-              predDate.setHours(0, 0, 0, 0);
-              return predDate >= now;
-            })
-            .map((pred: any) => ({
-              date: pred.date,
-              predicted_visitors: pred.predicted_visitors,
-              confidence_interval: pred.confidence_interval,
-              day_of_week: new Date(pred.date).toLocaleDateString('cs-CZ', { weekday: 'long' }),
-              is_weekend: [0, 6].includes(new Date(pred.date).getDay()),
-              weather_info: {
-                temperature_mean: pred.temperature_mean || 0,
-                precipitation: pred.precipitation || 0,
-                is_nice_weather: pred.is_nice_weather || false,
-                weather_description: ''
-              },
-              holiday_info: {
-                is_holiday: false,
-                holiday_name: null
-              }
-            }));
-          
-          if (futurePredictions.length > 0) {
-            setFutureData({
-              predictions: futurePredictions,
-              total_predicted: futurePredictions.reduce((sum: number, p: any) => sum + p.predicted_visitors, 0),
-              average_daily: futurePredictions.reduce((sum: number, p: any) => sum + p.predicted_visitors, 0) / futurePredictions.length
-            });
-          } else {
-            setFutureData(null);
-          }
-        } catch (futureErr) {
-          console.log('Future predictions not available:', futureErr);
+        if (futurePredictions.length > 0) {
+          setFutureData({
+            predictions: futurePredictions,
+            total_predicted: futurePredictions.reduce((sum: number, p: any) => sum + p.predicted_visitors, 0),
+            average_daily: futurePredictions.reduce((sum: number, p: any) => sum + p.predicted_visitors, 0) / futurePredictions.length,
+            period_days: futurePredictions.length
+          } as RangePredictionResponse);
+        } else {
           setFutureData(null);
         }
-        
-      } catch (err: any) {
-        console.error('Failed to fetch historical data:', err);
-        setError(err.message || t('error'));
-      } finally {
-        setLoading(false);
+      } catch (futureErr) {
+        console.log('Future predictions not available:', futureErr);
+        setFutureData(null);
       }
-    };
+      
+    } catch (err: any) {
+      console.error('Failed to fetch data:', err);
+      setError(err.message || t('error'));
+    } finally {
+      setLoading(false);
+    }
+  }, [timeRange, t]);
 
+  // Initial load a reload při změně rozsahu
+  useEffect(() => {
     fetchData();
-  }, [timeRange]);
+  }, [fetchData]);
+
+  // Hook pro automatický update při nových predikcích
+  usePredictionUpdates(fetchData, 30000); // Check každých 30 sekund
 
   const options = {
     responsive: true,
@@ -241,19 +252,16 @@ export default function VisitorChart() {
   });
 
   // Přidáme historické predikce (predikce pro datumy, kde máme i skutečná data)
-  predictionHistory?.history.forEach(p => {
+  // Backend automaticky načítá VŠECHNY predikce v daném rozsahu včetně historických
+  predictionHistory?.history.forEach((p: any) => {
     const existing = dateMap.get(p.date);
-    // Zobrazíme predikci pokud:
-    // 1. Není to budoucnost (skutečná historická predikce)
-    // 2. NEBO pokud máme pro tento datum skutečná data (můžeme porovnat)
-    if (!p.is_future || existing?.historical !== undefined) {
-      dateMap.set(p.date, {
-        ...existing,
-        historicalPrediction: p.predicted,
-        historicalPredLower: p.confidence_lower ?? undefined,
-        historicalPredUpper: p.confidence_upper ?? undefined
-      });
-    }
+    // Přidáme historickou predikci - zobrazujeme jako oranžovou linii v grafu
+    dateMap.set(p.date, {
+      ...existing,
+      historicalPrediction: p.predicted,  // Backend vrací 'predicted' ne 'predicted_visitors'
+      historicalPredLower: p.confidence_lower ?? p.confidence_interval?.lower ?? undefined,
+      historicalPredUpper: p.confidence_upper ?? p.confidence_interval?.upper ?? undefined
+    });
   });
 
   // Debug - kolik historických predikcí máme
