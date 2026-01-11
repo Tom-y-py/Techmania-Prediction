@@ -2,17 +2,17 @@
 
 import { Fragment, useState, useEffect } from 'react';
 import { Disclosure, Menu, Transition, Popover } from '@headlessui/react';
-import { BellIcon, ExclamationTriangleIcon, CalendarIcon, SunIcon, CheckCircleIcon } from '@heroicons/react/24/outline';
+import { BellIcon, ExclamationTriangleIcon, CalendarIcon, StarIcon } from '@heroicons/react/24/outline';
 import HealthStatus from './HealthStatus';
 import { useTranslations } from '@/lib/i18n';
 import { api } from '@/lib/api';
 
 interface Notification {
   id: string;
-  type: 'warning' | 'info' | 'success';
+  type: 'holiday' | 'vacation' | 'event';
   title: string;
   message: string;
-  time: string;
+  date: string;
 }
 
 export default function Header() {
@@ -28,68 +28,68 @@ export default function Header() {
   const loadNotifications = async () => {
     try {
       const today = new Date();
-      const endDate = new Date(today);
-      endDate.setDate(endDate.getDate() + 7);
+      const currentMonth = today.getMonth() + 1;
+      const currentYear = today.getFullYear();
+      
+      // Načíst eventy pro aktuální a příští měsíc
+      const [currentMonthEvents, nextMonthEvents] = await Promise.all([
+        api.getCalendarEvents(currentMonth, currentYear),
+        api.getCalendarEvents(currentMonth === 12 ? 1 : currentMonth + 1, currentMonth === 12 ? currentYear + 1 : currentYear)
+      ]);
 
-      const predictions = await api.predictRange({
-        start_date: today.toISOString().split('T')[0],
-        end_date: endDate.toISOString().split('T')[0]
-      });
+      const allEvents = [...currentMonthEvents.events, ...nextMonthEvents.events];
+      
+      // Filtrovat jen nadcházející eventy (dnes a následujících 14 dní)
+      const todayStr = today.toISOString().split('T')[0];
+      const futureDate = new Date(today);
+      futureDate.setDate(futureDate.getDate() + 14);
+      const futureDateStr = futureDate.toISOString().split('T')[0];
 
-      const newNotifications: Notification[] = [];
+      const upcomingEvents = allEvents
+        .filter(e => e.date >= todayStr && e.date <= futureDateStr)
+        .sort((a, b) => a.date.localeCompare(b.date));
 
-      predictions.predictions.forEach((pred) => {
-        // Vysoká návštěvnost
-        if (pred.predicted_visitors > 700) {
-          newNotifications.push({
-            id: `high-${pred.date}`,
-            type: 'warning',
-            title: t('highAttendance') || 'Vysoká návštěvnost',
-            message: `${new Date(pred.date).toLocaleDateString('cs-CZ')}: ${pred.predicted_visitors} návštěvníků`,
-            time: pred.day_of_week
-          });
-        }
+      const newNotifications: Notification[] = upcomingEvents.map(event => ({
+        id: `${event.type}-${event.date}-${event.name}`,
+        type: event.type as 'holiday' | 'vacation' | 'event',
+        title: event.name,
+        message: `${event.day_of_week}, ${new Date(event.date).toLocaleDateString('cs-CZ')}`,
+        date: event.date
+      }));
 
-        // Svátek
-        if (pred.holiday_info?.is_holiday && pred.holiday_info?.holiday_name) {
-          newNotifications.push({
-            id: `holiday-${pred.date}`,
-            type: 'info',
-            title: pred.holiday_info.holiday_name,
-            message: new Date(pred.date).toLocaleDateString('cs-CZ'),
-            time: pred.day_of_week
-          });
-        }
-
-        // Pěkné počasí
-        if (pred.weather_info?.is_nice_weather && pred.weather_info?.temperature_mean > 18) {
-          newNotifications.push({
-            id: `weather-${pred.date}`,
-            type: 'success',
-            title: t('niceWeather') || 'Pěkné počasí',
-            message: `${new Date(pred.date).toLocaleDateString('cs-CZ')}: ${pred.weather_info.temperature_mean.toFixed(0)}°C`,
-            time: pred.day_of_week
-          });
-        }
-      });
-
-      // Omezit na 5 notifikací
-      setNotifications(newNotifications.slice(0, 5));
-      setUnreadCount(Math.min(newNotifications.length, 5));
+      // Omezit na 6 notifikací
+      setNotifications(newNotifications.slice(0, 6));
+      setUnreadCount(Math.min(newNotifications.length, 6));
     } catch (error) {
       console.error('Error loading notifications:', error);
+      setNotifications([]);
     }
     setLoading(false);
   };
 
   const getIcon = (type: string) => {
     switch (type) {
-      case 'warning':
-        return <ExclamationTriangleIcon className="h-5 w-5 text-amber-500" />;
-      case 'success':
-        return <SunIcon className="h-5 w-5 text-green-500" />;
+      case 'holiday':
+        return <StarIcon className="h-5 w-5 text-red-500" />;
+      case 'vacation':
+        return <CalendarIcon className="h-5 w-5 text-orange-500" />;
+      case 'event':
+        return <ExclamationTriangleIcon className="h-5 w-5 text-purple-500" />;
       default:
         return <CalendarIcon className="h-5 w-5 text-blue-500" />;
+    }
+  };
+
+  const getTypeLabel = (type: string) => {
+    switch (type) {
+      case 'holiday':
+        return 'Svátek';
+      case 'vacation':
+        return 'Prázdniny';
+      case 'event':
+        return 'Akce';
+      default:
+        return '';
     }
   };
 
@@ -135,7 +135,7 @@ export default function Header() {
                 <div className="p-4">
                   <div className="flex items-center justify-between mb-3">
                     <h3 className="text-sm font-semibold text-gray-900 dark:text-white">
-                      {t('notificationsTitle') || 'Upozornění'}
+                      {t('upcomingEvents') || 'Nadcházející události'}
                     </h3>
                     {unreadCount > 0 && (
                       <button 
@@ -153,7 +153,7 @@ export default function Header() {
                       <div className="h-12 bg-gray-100 dark:bg-gray-700 rounded"></div>
                     </div>
                   ) : notifications.length > 0 ? (
-                    <div className="space-y-2">
+                    <div className="space-y-2 max-h-80 overflow-y-auto">
                       {notifications.map((notif) => (
                         <div 
                           key={notif.id}
@@ -168,15 +168,19 @@ export default function Header() {
                               {notif.message}
                             </p>
                           </div>
-                          <span className="text-xs text-gray-400 dark:text-gray-500 whitespace-nowrap">
-                            {notif.time}
+                          <span className={`text-xs px-1.5 py-0.5 rounded whitespace-nowrap ${
+                            notif.type === 'holiday' ? 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400' :
+                            notif.type === 'vacation' ? 'bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400' :
+                            'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400'
+                          }`}>
+                            {getTypeLabel(notif.type)}
                           </span>
                         </div>
                       ))}
                     </div>
                   ) : (
                     <p className="text-sm text-gray-500 dark:text-gray-400 text-center py-4">
-                      {t('noNotifications') || 'Žádná upozornění'}
+                      {t('noUpcomingEvents') || 'Žádné nadcházející události'}
                     </p>
                   )}
                   

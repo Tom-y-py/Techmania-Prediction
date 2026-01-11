@@ -4,7 +4,7 @@ FastAPI backend pro predikci návštěvnosti Techmanie.
 
 from fastapi import FastAPI, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
 from typing import List, Optional, Dict, Any
 from datetime import date, datetime, timedelta
@@ -1777,6 +1777,101 @@ async def get_calendar_heatmap(year: Optional[int] = None):
         raise HTTPException(
             status_code=500, detail=f"Chyba při generování heatmapy: {str(e)}"
         )
+
+
+# ==================== AI CHAT ====================
+
+class ChatMessage(BaseModel):
+    message: str = Field(..., description="Zpráva od uživatele")
+    history: Optional[List[Dict[str, str]]] = Field(default=None, description="Historie konverzace")
+
+
+class ChatResponse(BaseModel):
+    response: str
+    context_used: bool = True
+
+
+@app.post("/chat", tags=["AI Chat"])
+async def chat_endpoint(
+    request: ChatMessage,
+    db: Session = Depends(get_db) if DATABASE_ENABLED else None
+):
+    """
+    AI Chat endpoint pro dotazy na data o návštěvnosti.
+    Vrací odpověď jako streaming (Server-Sent Events).
+    """
+    try:
+        from chat import chat_stream
+        
+        def generate():
+            try:
+                for chunk in chat_stream(request.message, db, request.history):
+                    # SSE formát
+                    yield f"data: {json.dumps({'content': chunk})}\n\n"
+            except Exception as e:
+                yield f"data: {json.dumps({'content': f'❌ Chyba: {str(e)}'})}\n\n"
+            yield "data: [DONE]\n\n"
+        
+        return StreamingResponse(
+            generate(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                "X-Accel-Buffering": "no"
+            }
+        )
+    except ImportError as e:
+        raise HTTPException(status_code=500, detail=f"Chat modul není dostupný: {str(e)}")
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Chyba chatu: {str(e)}")
+
+
+@app.post("/chat/sync", response_model=ChatResponse, tags=["AI Chat"])
+async def chat_sync_endpoint(
+    request: ChatMessage,
+    db: Session = Depends(get_db) if DATABASE_ENABLED else None
+):
+    """
+    Synchronní verze AI chatu (bez streamování).
+    Vrací celou odpověď najednou.
+    """
+    try:
+        from chat import chat_sync
+        
+        response = chat_sync(request.message, db, request.history)
+        return ChatResponse(response=response)
+    except ImportError:
+        raise HTTPException(status_code=500, detail="Chat modul není dostupný")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Chyba chatu: {str(e)}")
+
+
+@app.get("/chat/tools", tags=["AI Chat"])
+async def get_chat_tools():
+    """
+    Vrátí seznam dostupných MCP nástrojů pro AI chat.
+    """
+    try:
+        from mcp_tools import MCP_TOOLS
+        
+        tools_summary = []
+        for tool in MCP_TOOLS:
+            func = tool.get("function", {})
+            tools_summary.append({
+                "name": func.get("name"),
+                "description": func.get("description"),
+                "parameters": list(func.get("parameters", {}).get("properties", {}).keys())
+            })
+        
+        return {
+            "tools_count": len(MCP_TOOLS),
+            "tools": tools_summary
+        }
+    except ImportError:
+        raise HTTPException(status_code=500, detail="MCP tools modul není dostupný")
 
 
 if __name__ == "__main__":
