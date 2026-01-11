@@ -160,6 +160,10 @@ def create_features(df: pd.DataFrame) -> pd.DataFrame:
     # === WEATHER INTERACTION FEATURES ===
     print("  ✓ Weather interaction features")
     
+    # Alias pro wind_speed_max (kvůli zpětné kompatibilitě s modely)
+    if 'wind_speed' in df.columns and 'wind_speed_max' not in df.columns:
+        df['wind_speed_max'] = df['wind_speed']
+    
     # PONECHAT sunshine a daylight (důležité features!)
     
     if 'sunshine_duration' in df.columns and 'daylight_duration' in df.columns:
@@ -213,7 +217,7 @@ def create_features(df: pd.DataFrame) -> pd.DataFrame:
     
     # precipitation_probability - fill with 0 (není dostupná)
     if 'precipitation_probability' in df.columns:
-        df['precipitation_probability'].fillna(0, inplace=True)
+        df.loc[:, 'precipitation_probability'] = df['precipitation_probability'].fillna(0)
     
     # School features - fill with 0 (žádní návštěvníci ze škol)
     school_cols = ['Mateřská_škola', 'Základní_škola', 'Střední_škola']

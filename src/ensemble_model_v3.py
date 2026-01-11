@@ -519,7 +519,11 @@ def main():
         X_train['predicted_google_trend'] = pred_trend_train
         X_val['predicted_google_trend'] = pred_trend_val
         
+        # ⚠️ DŮLEŽITÉ: Přidat do numeric_features pro správné uložení!
+        numeric_features = list(numeric_features) + ['predicted_google_trend']
+        
         print(f"  ✓ Added predicted_google_trend feature")
+        print(f"  ✓ Updated feature list: {len(numeric_features)} features")
     
     # IMPROVEMENT #4: Train models with Optuna
     print("\n" + "=" * 80)

@@ -9,7 +9,9 @@ import {
   CalendarIcon, 
   HomeIcon,
   Cog6ToothIcon,
-  InformationCircleIcon
+  InformationCircleIcon,
+  SparklesIcon,
+  CheckBadgeIcon
 } from '@heroicons/react/24/solid';
 import { useTranslations } from '@/lib/i18n';
 
@@ -26,6 +28,8 @@ export default function Sidebar() {
     { name: t('dashboard'), href: '/', icon: HomeIcon },
     { name: t('calendar') || 'Kalendář', href: '/calendar', icon: CalendarIcon },
     { name: t('analytics'), href: '/analytics', icon: ChartBarIcon },
+    { name: 'Události', href: '/events', icon: SparklesIcon },
+    { name: 'Přesnost predikcí', href: '/accuracy', icon: CheckBadgeIcon },
     { name: t('information'), href: '/info', icon: InformationCircleIcon },
     { name: t('settings'), href: '/settings', icon: Cog6ToothIcon },
   ];

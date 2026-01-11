@@ -25,42 +25,36 @@ export default function UpcomingEvents() {
 
   const loadEvents = async () => {
     try {
+      // Načíst uložené predikce místo volání nové predikce
+      const response = await api.getLatestPredictions(14);
+
+      const newEvents: UpcomingEvent[]= [];
       const today = new Date();
-      const endDate = new Date(today);
-      endDate.setDate(endDate.getDate() + 14);
+      today.setHours(0, 0, 0, 0);
 
-      const response = await api.predictRange({
-        start_date: today.toISOString().split('T')[0],
-        end_date: endDate.toISOString().split('T')[0]
-      });
+      response.predictions.forEach((pred: any) => {
+        const predDate = new Date(pred.date);
+        predDate.setHours(0, 0, 0, 0);
+        
+        // Pouze budoucí události
+        if (predDate < today) return;
+        
+        const dayOfWeek = predDate.toLocaleDateString('cs-CZ', { weekday: 'long' });
 
-      const newEvents: UpcomingEvent[] = [];
-
-      response.predictions.forEach(pred => {
-        // Svátek
-        if (pred.holiday_info?.is_holiday && pred.holiday_info?.holiday_name) {
-          newEvents.push({
-            date: pred.date,
-            name: pred.holiday_info.holiday_name,
-            type: 'holiday',
-            visitors: pred.predicted_visitors,
-            dayOfWeek: pred.day_of_week
-          });
-        }
-
-        // Vysoká návštěvnost (> 600) - ale jen pokud to není už svátek
-        if (pred.predicted_visitors > 600 && !pred.holiday_info?.is_holiday) {
+        // Vysoká návštěvnost (> 600)
+        if (pred.predicted_visitors > 600) {
           newEvents.push({
             date: pred.date,
             name: t('highTraffic') || 'Vysoká návštěvnost',
             type: 'high_traffic',
-            visitors: pred.predicted_visitors,
-            dayOfWeek: pred.day_of_week
+            visitors: Math.round(pred.predicted_visitors),
+            dayOfWeek: dayOfWeek
           });
         }
       });
 
       // Seřadit podle data a omezit na 4 události
+      newEvents.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
       setEvents(newEvents.slice(0, 4));
     } catch (error) {
       console.error('Error loading events:', error);
