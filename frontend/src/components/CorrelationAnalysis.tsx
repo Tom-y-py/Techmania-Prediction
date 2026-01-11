@@ -9,8 +9,10 @@ import {
   CalendarIcon,
   CalendarDaysIcon 
 } from '@heroicons/react/24/outline';
+import { useTranslations } from '@/lib/i18n';
 
 export default function CorrelationAnalysis() {
+  const t = useTranslations('analytics.correlation');
   const [data, setData] = useState<CorrelationData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -22,13 +24,7 @@ export default function CorrelationAnalysis() {
         setData(correlationData);
       } catch (err: any) {
         console.error('Failed to fetch correlation data:', err);
-        // Pro demo účely můžeme použít ukázková data
-        setData({
-          weather_correlation: 0.65,
-          temperature_correlation: 0.58,
-          holiday_impact: 1.45,
-          weekend_impact: 1.32
-        });
+        setError(err.message || 'Nepodařilo se načíst data');
       } finally {
         setLoading(false);
       }
@@ -65,9 +61,9 @@ export default function CorrelationAnalysis() {
 
   const getCorrelationStrength = (value: number) => {
     const absValue = Math.abs(value);
-    if (absValue >= 0.7) return { text: 'Silná', color: 'text-green-600' };
-    if (absValue >= 0.4) return { text: 'Střední', color: 'text-yellow-600' };
-    return { text: 'Slabá', color: 'text-gray-600' };
+    if (absValue >= 0.7) return { text: t('strong'), color: 'text-green-600' };
+    if (absValue >= 0.4) return { text: t('medium'), color: 'text-yellow-600' };
+    return { text: t('weak'), color: 'text-gray-600' };
   };
 
   const getImpactColor = (value: number) => {
@@ -76,10 +72,16 @@ export default function CorrelationAnalysis() {
     return 'text-gray-600';
   };
 
+  const getImpactLevel = (value: number) => {
+    if (value >= 1.3) return t('high');
+    if (value >= 1.1) return t('medium');
+    return t('low');
+  };
+
   return (
     <div className="bg-white dark:bg-gray-800 shadow-sm ring-1 ring-gray-900/5 dark:ring-gray-700 sm:rounded-xl p-6">
       <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-6">
-        Analýza korelací a vlivů
+        {t('title')}
       </h3>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -92,7 +94,7 @@ export default function CorrelationAnalysis() {
               </div>
               <div>
                 <div className="text-sm font-medium text-gray-700 dark:text-gray-300">
-                  Korelace s počasím
+                  {t('weatherCorrelation')}
                 </div>
                 <div className="text-2xl font-bold text-gray-900 dark:text-white">
                   {(data.weather_correlation * 100).toFixed(0)}%
@@ -104,7 +106,7 @@ export default function CorrelationAnalysis() {
             </div>
           </div>
           <div className="mt-2 text-xs text-gray-600 dark:text-gray-400">
-            Pěkné počasí má {data.weather_correlation > 0 ? 'pozitivní' : 'negativní'} vliv na návštěvnost
+            {data.weather_correlation > 0 ? t('positiveInfluence') : t('negativeInfluence')}
           </div>
         </div>
 
@@ -117,7 +119,7 @@ export default function CorrelationAnalysis() {
               </div>
               <div>
                 <div className="text-sm font-medium text-gray-700 dark:text-gray-300">
-                  Korelace s teplotou
+                  {t('temperatureCorrelation')}
                 </div>
                 <div className="text-2xl font-bold text-gray-900 dark:text-white">
                   {(data.temperature_correlation * 100).toFixed(0)}%
@@ -129,7 +131,7 @@ export default function CorrelationAnalysis() {
             </div>
           </div>
           <div className="mt-2 text-xs text-gray-600 dark:text-gray-400">
-            Teplota ovlivňuje návštěvnost {getCorrelationStrength(data.temperature_correlation).text.toLowerCase()}
+            {t('influencesAttendance')} {getCorrelationStrength(data.temperature_correlation).text.toLowerCase()}
           </div>
         </div>
 
@@ -142,7 +144,7 @@ export default function CorrelationAnalysis() {
               </div>
               <div>
                 <div className="text-sm font-medium text-gray-700 dark:text-gray-300">
-                  Vliv svátků
+                  {t('holidayImpact')}
                 </div>
                 <div className="text-2xl font-bold text-gray-900 dark:text-white">
                   {data.holiday_impact.toFixed(2)}x
@@ -150,11 +152,11 @@ export default function CorrelationAnalysis() {
               </div>
             </div>
             <div className={`text-sm font-medium ${getImpactColor(data.holiday_impact)}`}>
-              {data.holiday_impact >= 1.3 ? 'Vysoký' : data.holiday_impact >= 1.1 ? 'Střední' : 'Nízký'}
+              {getImpactLevel(data.holiday_impact)}
             </div>
           </div>
           <div className="mt-2 text-xs text-gray-600 dark:text-gray-400">
-            O svátcích je návštěvnost {((data.holiday_impact - 1) * 100).toFixed(0)}% vyšší
+            {t('holidaysHigher')} {((data.holiday_impact - 1) * 100).toFixed(0)}% {t('higher')}
           </div>
         </div>
 
@@ -167,7 +169,7 @@ export default function CorrelationAnalysis() {
               </div>
               <div>
                 <div className="text-sm font-medium text-gray-700 dark:text-gray-300">
-                  Vliv víkendů
+                  {t('weekendImpact')}
                 </div>
                 <div className="text-2xl font-bold text-gray-900 dark:text-white">
                   {data.weekend_impact.toFixed(2)}x
@@ -175,11 +177,11 @@ export default function CorrelationAnalysis() {
               </div>
             </div>
             <div className={`text-sm font-medium ${getImpactColor(data.weekend_impact)}`}>
-              {data.weekend_impact >= 1.3 ? 'Vysoký' : data.weekend_impact >= 1.1 ? 'Střední' : 'Nízký'}
+              {getImpactLevel(data.weekend_impact)}
             </div>
           </div>
           <div className="mt-2 text-xs text-gray-600 dark:text-gray-400">
-            O víkendech je návštěvnost {((data.weekend_impact - 1) * 100).toFixed(0)}% vyšší
+            {t('weekendsHigher')} {((data.weekend_impact - 1) * 100).toFixed(0)}% {t('higher')}
           </div>
         </div>
       </div>
@@ -187,13 +189,13 @@ export default function CorrelationAnalysis() {
       {/* Info Box */}
       <div className="mt-6 bg-gray-50 dark:bg-gray-900 rounded-lg p-4">
         <h4 className="text-sm font-semibold text-gray-900 dark:text-white mb-2">
-          ℹ️ Interpretace korelací
+          ℹ️ {t('interpretationTitle')}
         </h4>
         <ul className="text-xs text-gray-600 dark:text-gray-400 space-y-1">
-          <li>• <strong>Korelace 0.7+</strong>: Silný vztah mezi faktory</li>
-          <li>• <strong>Korelace 0.4-0.7</strong>: Střední vztah</li>
-          <li>• <strong>Korelace &lt;0.4</strong>: Slabý vztah</li>
-          <li>• <strong>Impact multiplikátor</strong>: Jak moc se návštěvnost násobí (1.0 = žádný efekt)</li>
+          <li>• <strong>{t('strongCorrelation')}</strong>: {t('strongDesc')}</li>
+          <li>• <strong>{t('mediumCorrelation')}</strong>: {t('mediumDesc')}</li>
+          <li>• <strong>{t('weakCorrelation')}</strong>: {t('weakDesc')}</li>
+          <li>• <strong>{t('impactMultiplier')}</strong>: {t('impactDesc')}</li>
         </ul>
       </div>
     </div>
