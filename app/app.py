@@ -64,30 +64,14 @@ sys.path.append(str(Path(__file__).parent.parent / "src"))
 from feature_engineering import create_features
 from services import holiday_service, weather_service, event_scraper_service
 
-# Konfigurace z .env
-ENVIRONMENT = os.getenv("ENVIRONMENT", "development")
-HOST = os.getenv("HOST", "0.0.0.0")
-PORT = int(os.getenv("PORT", "5000"))
-CORS_ORIGINS = os.getenv("CORS_ORIGINS", "http://localhost:3000").split(",")
-API_TITLE = os.getenv("API_TITLE", "Techmania Prediction API")
-API_VERSION = os.getenv("API_VERSION", "2.0.0")
-DEBUG = os.getenv("DEBUG", "true").lower() == "true"
+# Import centrální konfigurace
+from config import (
+    config, ENVIRONMENT, HOST, PORT, CORS_ORIGINS,
+    API_TITLE, API_VERSION, DEBUG, BASE_DIR, MODELS_DIR, DATA_DIR
+)
 
-# Nastavení cest podle prostředí
-if ENVIRONMENT == "production":
-    # Cesty v Docker kontejneru
-    BASE_DIR = Path("/app")
-    MODELS_DIR = BASE_DIR / "models"
-    DATA_DIR = BASE_DIR / "data" / "raw"
-else:
-    # Lokální cesty pro development
-    BASE_DIR = Path(__file__).parent.parent
-    MODELS_DIR = BASE_DIR / "models"
-    DATA_DIR = BASE_DIR / "data" / "raw"
-
-print(f"🔧 Prostředí: {ENVIRONMENT}")
-print(f"📁 Adresář modelů: {MODELS_DIR}")
-print(f"📁 Adresář dat: {DATA_DIR}")
+# Vypsat info o konfiguraci
+config.print_info()
 
 # Inicializace FastAPI
 app = FastAPI(

@@ -59,7 +59,6 @@ def load_historical_data(csv_path: str = "../data/processed/techmania_with_weath
                     public_visitors=float(row['public_visitors']) if pd.notna(row.get('public_visitors')) else None,
                     total_visitors=float(row['total_visitors']),
                     extra=str(row['extra']) if pd.notna(row.get('extra')) else None,
-                    opening_hours=str(row['opening_hours']) if pd.notna(row.get('opening_hours')) else None,
                     
                     # Calendar features - Basic
                     is_weekend=int(row['is_weekend']) if pd.notna(row.get('is_weekend')) else None,
@@ -124,13 +123,6 @@ def load_historical_data(csv_path: str = "../data/processed/techmania_with_weath
                     weather_forecast_confidence=float(row['weather_forecast_confidence']) if pd.notna(row.get('weather_forecast_confidence')) else None,
                     temperature_trend_3d=float(row['temperature_trend_3d']) if pd.notna(row.get('temperature_trend_3d')) else None,
                     is_weather_improving=int(row['is_weather_improving']) if pd.notna(row.get('is_weather_improving')) else None,
-                    
-                    # Additional features
-                    google_trend=float(row['google_trend']) if pd.notna(row.get('google_trend')) else None,
-                    Mateřská_škola=float(row['Mateřská_škola']) if pd.notna(row.get('Mateřská_škola')) else None,
-                    Střední_škola=float(row['Střední_škola']) if pd.notna(row.get('Střední_škola')) else None,
-                    Základní_škola=float(row['Základní_škola']) if pd.notna(row.get('Základní_škola')) else None,
-                    is_event=int(row['is_event']) if pd.notna(row.get('is_event')) else None,
                 )
                 db.add(record)
                 records_added += 1
