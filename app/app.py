@@ -16,7 +16,6 @@ import os
 import json
 import math
 from pathlib import Path
-from dotenv import load_dotenv
 from sqlalchemy.orm import Session
 
 # Custom JSON encoder pro NaN hodnoty
@@ -42,8 +41,14 @@ def sanitize_for_json(obj):
         return float(obj)
     return obj
 
-# Načíst proměnné prostředí
-load_dotenv()
+# Import centrální konfigurace (načítá .env automaticky)
+from config import (
+    config, ENVIRONMENT, HOST, PORT, CORS_ORIGINS,
+    API_TITLE, API_VERSION, DEBUG, BASE_DIR, MODELS_DIR, DATA_DIR
+)
+
+# Vypsat info o konfiguraci
+config.print_info()
 
 # Import databázových komponent
 try:
@@ -73,48 +78,6 @@ except ImportError:
     print("⚠️ Fallback to legacy feature_engineering")
 
 from services import holiday_service, weather_service, event_scraper_service
-
-# Import refactored prediction utilities
-try:
-    from prediction import (
-        get_weather_for_date,
-        get_holiday_features,
-        predict_with_models,
-        ensemble_prediction,
-        should_use_catboost,
-        get_effective_weights,
-        calculate_confidence_interval
-    )
-    PREDICTION_UTILS_AVAILABLE = True
-    print("✅ Using refactored prediction utilities")
-except ImportError:
-    PREDICTION_UTILS_AVAILABLE = False
-    print("⚠️ Prediction utilities not available")
-
-# Konfigurace z .env
-ENVIRONMENT = os.getenv("ENVIRONMENT", "development")
-HOST = os.getenv("HOST", "0.0.0.0")
-PORT = int(os.getenv("PORT", "5000"))
-CORS_ORIGINS = os.getenv("CORS_ORIGINS", "http://localhost:3000").split(",")
-API_TITLE = os.getenv("API_TITLE", "Techmania Prediction API")
-API_VERSION = os.getenv("API_VERSION", "2.0.0")
-DEBUG = os.getenv("DEBUG", "true").lower() == "true"
-
-# Nastavení cest podle prostředí
-if ENVIRONMENT == "production":
-    # Cesty v Docker kontejneru
-    BASE_DIR = Path("/app")
-    MODELS_DIR = BASE_DIR / "models"
-    DATA_DIR = BASE_DIR / "data" / "raw"
-else:
-    # Lokální cesty pro development
-    BASE_DIR = Path(__file__).parent.parent
-    MODELS_DIR = BASE_DIR / "models"
-    DATA_DIR = BASE_DIR / "data" / "raw"
-
-print(f"🔧 Prostředí: {ENVIRONMENT}")
-print(f"📁 Adresář modelů: {MODELS_DIR}")
-print(f"📁 Adresář dat: {DATA_DIR}")
 
 # Inicializace FastAPI
 app = FastAPI(
