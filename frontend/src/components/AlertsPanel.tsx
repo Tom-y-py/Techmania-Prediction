@@ -35,49 +35,33 @@ export default function AlertsPanel() {
     const newAlerts: Alert[] = [];
 
     try {
-      // Načíst predikce na příštích 14 dní
-      const today = new Date();
-      const endDate = new Date(today);
-      endDate.setDate(endDate.getDate() + 14);
-
-      const predictions = await api.predictRange({
-        start_date: today.toISOString().split('T')[0],
-        end_date: endDate.toISOString().split('T')[0]
-      });
+      // Načíst uložené predikce místo volání nové predikce
+      const savedPredictions = await api.getLatestPredictions(14);
 
       // Analyzovat predikce a vytvořit alerty
-      predictions.predictions.forEach((pred, index) => {
+      savedPredictions.predictions.forEach((pred: any) => {
+        const predDate = new Date(pred.date);
+        const dayOfWeek = predDate.toLocaleDateString('cs-CZ', { weekday: 'long' });
+        
         // Vysoká návštěvnost (> 700)
         if (pred.predicted_visitors > 700) {
           newAlerts.push({
             id: `high-${pred.date}`,
             type: 'warning',
             title: t('highVisitors') || 'Vysoká návštěvnost očekávána',
-            message: `${new Date(pred.date).toLocaleDateString('cs-CZ')} (${pred.day_of_week}): očekáváno ${pred.predicted_visitors} návštěvníků`,
-            date: pred.date,
-            dismissable: true
-          });
-        }
-
-        // Svátek
-        if (pred.holiday_info?.is_holiday && pred.holiday_info?.holiday_name) {
-          newAlerts.push({
-            id: `holiday-${pred.date}`,
-            type: 'info',
-            title: t('upcomingHoliday') || 'Nadcházející svátek',
-            message: `${new Date(pred.date).toLocaleDateString('cs-CZ')}: ${pred.holiday_info.holiday_name}`,
+            message: `${predDate.toLocaleDateString('cs-CZ')} (${dayOfWeek}): očekáváno ${Math.round(pred.predicted_visitors)} návštěvníků`,
             date: pred.date,
             dismissable: true
           });
         }
 
         // Pěkné počasí (může zvýšit návštěvnost venkovních aktivit nebo snížit indoor)
-        if (pred.weather_info?.is_nice_weather && pred.weather_info?.temperature_mean > 20) {
+        if (pred.is_nice_weather && pred.temperature_mean > 20) {
           newAlerts.push({
             id: `weather-${pred.date}`,
             type: 'info',
             title: t('niceWeather') || 'Pěkné počasí',
-            message: `${new Date(pred.date).toLocaleDateString('cs-CZ')}: ${pred.weather_info.temperature_mean.toFixed(1)}°C - možný vliv na návštěvnost`,
+            message: `${predDate.toLocaleDateString('cs-CZ')}: ${pred.temperature_mean?.toFixed(1) || 'N/A'}°C - možný vliv na návštěvnost`,
             date: pred.date,
             dismissable: true
           });
@@ -112,15 +96,21 @@ export default function AlertsPanel() {
       }
 
       // Víkend alert
-      const nextWeekend = predictions.predictions.find(p => p.is_weekend);
+      const nextWeekend = savedPredictions.predictions.find((p: any) => {
+        const predDate = new Date(p.date);
+        return [0, 6].includes(predDate.getDay());
+      });
       if (nextWeekend) {
-        const weekendPredictions = predictions.predictions.filter(p => p.is_weekend);
-        const totalWeekend = weekendPredictions.reduce((sum, p) => sum + p.predicted_visitors, 0);
+        const weekendPredictions = savedPredictions.predictions.filter((p: any) => {
+          const predDate = new Date(p.date);
+          return [0, 6].includes(predDate.getDay());
+        });
+        const totalWeekend = weekendPredictions.reduce((sum: number, p: any) => sum + p.predicted_visitors, 0);
         newAlerts.push({
           id: 'weekend-forecast',
           type: 'info',
           title: t('weekendForecast') || 'Víkendová předpověď',
-          message: `${t('expectedTotal') || 'Očekávaný celkový počet'}: ${totalWeekend.toLocaleString('cs-CZ')} ${t('visitors') || 'návštěvníků'}`,
+          message: `${t('expectedTotal') || 'Očekávaný celkový počet'}: ${Math.round(totalWeekend).toLocaleString('cs-CZ')} ${t('visitors') || 'návštěvníků'}`,
           dismissable: true
         });
       }

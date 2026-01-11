@@ -13,10 +13,14 @@ sys.path.append(str(Path(__file__).parent))
 from database import init_db, SessionLocal, HistoricalData, TemplateData
 
 
-def load_historical_data(csv_path: str = "../data/processed/techmania_with_weather_and_holidays.csv"):
+def load_historical_data(csv_path: str = "../data/processed/techmania_with_weather_and_holidays.csv", auto_skip_if_exists: bool = False):
     """
     Load historical data from CSV into historical_data table.
     This data is used ONLY for model training.
+    
+    Args:
+        csv_path: Path to CSV file
+        auto_skip_if_exists: If True, skip loading if data already exists (non-interactive mode)
     """
     
     # Read CSV
@@ -36,6 +40,9 @@ def load_historical_data(csv_path: str = "../data/processed/techmania_with_weath
         existing_count = db.query(HistoricalData).count()
         if existing_count > 0:
             print(f"⚠️  Database already contains {existing_count} historical records.")
+            if auto_skip_if_exists:
+                print("⏭️  Skipping historical data load (auto mode).")
+                return
             response = input("Do you want to clear and reload? (yes/no): ")
             if response.lower() == 'yes':
                 db.query(HistoricalData).delete()
@@ -104,7 +111,7 @@ def load_historical_data(csv_path: str = "../data/processed/techmania_with_weath
                     weather_code=int(row['weather_code']) if pd.notna(row.get('weather_code')) else None,
                     
                     # Weather - Wind
-                    wind_speed_max=float(row['wind_speed_max']) if pd.notna(row.get('wind_speed_max')) else None,
+                    wind_speed=float(row['wind_speed']) if pd.notna(row.get('wind_speed')) else None,
                     wind_gusts_max=float(row['wind_gusts_max']) if pd.notna(row.get('wind_gusts_max')) else None,
                     wind_direction=int(row['wind_direction']) if pd.notna(row.get('wind_direction')) else None,
                     
@@ -161,10 +168,14 @@ def load_historical_data(csv_path: str = "../data/processed/techmania_with_weath
         db.close()
 
 
-def load_template_data(csv_path: str = "../data/raw/techmania_2026_template.csv"):
+def load_template_data(csv_path: str = "../data/raw/techmania_2026_template.csv", auto_skip_if_exists: bool = False):
     """
     Load template data for 2026 into template_data table.
     This data serves as base for predictions and will be updated with real data.
+    
+    Args:
+        csv_path: Path to CSV file
+        auto_skip_if_exists: If True, skip loading if data already exists (non-interactive mode)
     """
     
     # Read CSV
@@ -184,6 +195,9 @@ def load_template_data(csv_path: str = "../data/raw/techmania_2026_template.csv"
         existing_count = db.query(TemplateData).count()
         if existing_count > 0:
             print(f"⚠️  Database already contains {existing_count} template records.")
+            if auto_skip_if_exists:
+                print("⏭️  Skipping template data load (auto mode).")
+                return
             response = input("Do you want to clear and reload? (yes/no): ")
             if response.lower() == 'yes':
                 db.query(TemplateData).delete()
@@ -253,7 +267,7 @@ def load_template_data(csv_path: str = "../data/raw/techmania_2026_template.csv"
                     precipitation_hours=float(row['precipitation_hours']) if pd.notna(row.get('precipitation_hours')) else None,
                     weather_code=int(row['weather_code']) if pd.notna(row.get('weather_code')) else None,
                     
-                    wind_speed_max=float(row['wind_speed_max']) if pd.notna(row.get('wind_speed_max')) else None,
+                    wind_speed=float(row['wind_speed']) if pd.notna(row.get('wind_speed')) else None,
                     wind_gusts_max=float(row['wind_gusts_max']) if pd.notna(row.get('wind_gusts_max')) else None,
                     wind_direction=int(row['wind_direction']) if pd.notna(row.get('wind_direction')) else None,
                     

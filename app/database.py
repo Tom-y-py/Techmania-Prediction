@@ -79,7 +79,7 @@ class HistoricalData(Base):
     weather_code = Column(Integer)
     
     # Weather - Wind
-    wind_speed_max = Column(Float)
+    wind_speed = Column(Float)
     wind_gusts_max = Column(Float)
     wind_direction = Column(Integer)
     
@@ -98,6 +98,13 @@ class HistoricalData(Base):
     weather_forecast_confidence = Column(Float)
     temperature_trend_3d = Column(Float)
     is_weather_improving = Column(Integer)
+    
+    # Additional features
+    google_trend = Column(Float)
+    Mateřská_škola = Column(Float)
+    Střední_škola = Column(Float)
+    Základní_škola = Column(Float)
+    is_event = Column(Integer)
     
     # Metadata
     created_at = Column(DateTime, default=datetime.utcnow)
@@ -171,7 +178,7 @@ class TemplateData(Base):
     weather_code = Column(Integer, nullable=True)
     
     # Weather - Wind
-    wind_speed_max = Column(Float, nullable=True)
+    wind_speed = Column(Float, nullable=True)
     wind_gusts_max = Column(Float, nullable=True)
     wind_direction = Column(Integer, nullable=True)
     

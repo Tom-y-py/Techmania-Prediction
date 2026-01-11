@@ -78,29 +78,48 @@ export default function VisitorChart() {
         }
         
         // Načteme predikci pouze od dneška dopředu
-        // Pro minulost používáme skutečná historická data (už načtená výše)
-        // Weather forecast API nepodporuje predikce pro minulé dny
+        // DŮLEŽITÉ: Používáme uložené predikce z databáze, NEvoláme novou predikci!
+        // Nové predikce se vytváří pouze přes RangePredictionForm
         try {
+          const savedPredictions = await api.getLatestPredictions(15);
+          
+          // Filtrovat pouze budoucí predikce (od dneška)
           const now = new Date();
-          const end = new Date(now);
-          end.setDate(end.getDate() + 10); // 10 dní dopředu
+          now.setHours(0, 0, 0, 0);
           
-          // Formátujeme datumy ve formátu YYYY-MM-DD (stejně jako v RangePredictionForm)
-          const formatDateString = (date: Date): string => {
-            const year = date.getFullYear();
-            const month = String(date.getMonth() + 1).padStart(2, '0');
-            const day = String(date.getDate()).padStart(2, '0');
-            return `${year}-${month}-${day}`;
-          };
+          const futurePredictions = savedPredictions.predictions
+            .filter((pred: any) => {
+              const predDate = new Date(pred.date);
+              predDate.setHours(0, 0, 0, 0);
+              return predDate >= now;
+            })
+            .map((pred: any) => ({
+              date: pred.date,
+              predicted_visitors: pred.predicted_visitors,
+              confidence_interval: pred.confidence_interval,
+              day_of_week: new Date(pred.date).toLocaleDateString('cs-CZ', { weekday: 'long' }),
+              is_weekend: [0, 6].includes(new Date(pred.date).getDay()),
+              weather_info: {
+                temperature_mean: pred.temperature_mean || 0,
+                precipitation: pred.precipitation || 0,
+                is_nice_weather: pred.is_nice_weather || false,
+                weather_description: ''
+              },
+              holiday_info: {
+                is_holiday: false,
+                holiday_name: null
+              }
+            }));
           
-          const startDate = formatDateString(now);
-          const endDate = formatDateString(end);
-          
-          const prediction = await api.predictRange({
-            start_date: startDate,
-            end_date: endDate,
-          });
-          setFutureData(prediction);
+          if (futurePredictions.length > 0) {
+            setFutureData({
+              predictions: futurePredictions,
+              total_predicted: futurePredictions.reduce((sum: number, p: any) => sum + p.predicted_visitors, 0),
+              average_daily: futurePredictions.reduce((sum: number, p: any) => sum + p.predicted_visitors, 0) / futurePredictions.length
+            });
+          } else {
+            setFutureData(null);
+          }
         } catch (futureErr) {
           console.log('Future predictions not available:', futureErr);
           setFutureData(null);
@@ -469,7 +488,7 @@ export default function VisitorChart() {
       </div>
 
       {/* Prediction Accuracy Stats */}
-      {predictionHistory && predictionHistory.summary.valid_comparisons > 0 && (
+      {predictionHistory && predictionHistory.summary && predictionHistory.summary.valid_comparisons > 0 && (
         <div className="mt-6 pt-4 border-t border-gray-200 dark:border-gray-700">
           <div className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">
             {t('predictionAccuracy') || 'Přesnost predikcí'}

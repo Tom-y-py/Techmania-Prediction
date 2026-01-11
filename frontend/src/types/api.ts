@@ -187,3 +187,113 @@ export interface CalendarEventsResponse {
   year: number;
   total_events: number;
 }
+
+// Typy pro Events Management
+export interface EventResponse {
+  id: number;
+  event_date: string;
+  title: string;
+  description: string | null;
+  venue: string;
+  category: string;
+  expected_attendance: string;
+  source: string;
+  source_url: string | null;
+  impact_level: number;
+  is_active: boolean;
+  created_at: string;
+}
+
+export interface EventCreate {
+  event_date: string;
+  title: string;
+  description?: string | null;
+  venue?: string;
+  category?: string;
+  expected_attendance?: string;
+  impact_level?: number;
+}
+
+export interface EventUpdate {
+  title?: string;
+  description?: string | null;
+  venue?: string;
+  category?: string;
+  expected_attendance?: string;
+  impact_level?: number;
+  is_active?: boolean;
+}
+
+export interface EventsListResponse {
+  events: EventResponse[];
+  total_count: number;
+  date_range: {
+    start: string;
+    end: string;
+  } | null;
+}
+
+export interface ScraperRunRequest {
+  start_date: string;
+  end_date: string;
+  sources?: string[];
+}
+
+export interface ScraperRunResponse {
+  success: boolean;
+  message: string;
+  events_found: number;
+  events_saved: number;
+  date_range: {
+    start: string;
+    end: string;
+  };
+  sources_scraped: string[];
+}
+
+// Typy pro AI Chat
+export interface ChatMessage {
+  message: string;
+  history?: Array<{ role: string; content: string }>;
+}
+
+export interface ChatResponse {
+  response: string;
+  context_used: boolean;
+}
+
+// Typy pro Analytics - Correlation
+export interface CorrelationAnalysisResponse {
+  correlations: {
+    weather_correlation: number;
+    temperature_correlation: number;
+    holiday_impact: number;
+    weekend_impact: number;
+  };
+  description: string;
+}
+
+// Typy pro Analytics - Seasonality
+export interface SeasonalityAnalysisResponse {
+  by_weekday: Record<string, number>;
+  by_month: Record<string, number>;
+  holiday_vs_regular: {
+    holiday_avg: number;
+    regular_avg: number;
+    difference: number;
+  };
+}
+
+// Typy pro Analytics - Heatmap
+export interface HeatmapDataPoint {
+  date: string;
+  visitors: number;
+}
+
+export interface HeatmapResponse {
+  year?: number;
+  data: HeatmapDataPoint[];
+  min_visitors: number;
+  max_visitors: number;
+  available_years: number[];
+}
