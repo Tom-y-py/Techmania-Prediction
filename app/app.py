@@ -22,9 +22,10 @@ load_dotenv()
 # Import databázových komponent
 try:
     from database import (
-        get_db, init_db, Prediction, HistoricalData, TemplateData,
+        get_db, init_db, Prediction, HistoricalData, TemplateData, Event,
         get_next_version, validate_future_date, mark_template_complete,
-        get_complete_template_records, get_latest_prediction
+        get_complete_template_records, get_latest_prediction,
+        get_events_for_date, get_events_for_range, update_template_event_flag
     )
     DATABASE_ENABLED = True
 except ImportError as e:
@@ -35,7 +36,7 @@ except ImportError as e:
 sys.path.append(str(Path(__file__).parent.parent / "src"))
 
 from feature_engineering import create_features
-from services import holiday_service, weather_service
+from services import holiday_service, weather_service, event_scraper_service
 
 # Konfigurace z .env
 ENVIRONMENT = os.getenv("ENVIRONMENT", "development")
@@ -217,6 +218,63 @@ class TemplateDataBatchResponse(BaseModel):
     failed_updates: int
     details: List[TemplateDataPatchResponse]
 
+# Event modely
+class EventCreate(BaseModel):
+    """Model pro vytvoreni eventu"""
+    event_date: str = Field(..., description="Datum eventu ve formatu YYYY-MM-DD")
+    title: str = Field(..., description="Nazev eventu")
+    description: Optional[str] = Field(None, description="Popis eventu")
+    venue: str = Field(default="Plzen", description="Misto konani")
+    category: str = Field(default="custom", description="Kategorie eventu")
+    expected_attendance: str = Field(default="stredni", description="Odhad navstevnosti: male/stredni/velke/masivni")
+    impact_level: int = Field(default=2, ge=1, le=5, description="Vliv na navstevnost 1-5")
+
+class EventUpdate(BaseModel):
+    """Model pro update eventu"""
+    title: Optional[str] = None
+    description: Optional[str] = None
+    venue: Optional[str] = None
+    category: Optional[str] = None
+    expected_attendance: Optional[str] = None
+    impact_level: Optional[int] = Field(None, ge=1, le=5)
+    is_active: Optional[bool] = None
+
+class EventResponse(BaseModel):
+    """Model pro odpoved s eventem"""
+    id: int
+    event_date: str
+    title: str
+    description: Optional[str]
+    venue: str
+    category: str
+    expected_attendance: str
+    source: str
+    source_url: Optional[str]
+    impact_level: int
+    is_active: bool
+    created_at: str
+
+class EventsListResponse(BaseModel):
+    """Model pro seznam eventu"""
+    events: List[EventResponse]
+    total_count: int
+    date_range: Optional[Dict[str, str]]
+
+class ScraperRunRequest(BaseModel):
+    """Model pro spusteni scraperu"""
+    start_date: str = Field(..., description="Datum od ve formatu YYYY-MM-DD")
+    end_date: str = Field(..., description="Datum do ve formatu YYYY-MM-DD")
+    sources: Optional[List[str]] = Field(default=["goout", "plzen.eu"], description="Seznam zdroju pro scraping")
+
+class ScraperRunResponse(BaseModel):
+    """Model pro odpoved ze scraperu"""
+    success: bool
+    message: str
+    events_found: int
+    events_saved: int
+    date_range: Dict[str, str]
+    sources_scraped: List[str]
+
 # Načtení modelů při startu
 @app.on_event("startup")
 async def load_models():
@@ -266,38 +324,39 @@ async def load_models():
         # Načtení seznamu features
         feature_columns = joblib.load(MODELS_DIR / "feature_columns.pkl")
 
-        # Načtení historických dat pro statistiky
-        try:
-            # 1. Načíst historická data (do 2025)
-            historical_data = pd.read_csv(DATA_DIR / "techmania_cleaned_master.csv")
-            historical_data["date"] = pd.to_datetime(historical_data["date"])
-            print(
-                f"   - Historická data: {len(historical_data)} záznamů (do {historical_data['date'].max().date()})"
-            )
-
-            # 2. Načíst template pro 2026 (s předvyplněnými holiday features)
-            template_2026_path = DATA_DIR / "techmania_2026_template.csv"
-            if template_2026_path.exists():
-                df_2026 = pd.read_csv(template_2026_path)
-                df_2026["date"] = pd.to_datetime(df_2026["date"])
-
-                # Spojit s historickými daty (pokud už tam nejsou data z 2026)
-                max_historical_date = historical_data["date"].max()
-                df_2026_filtered = df_2026[df_2026["date"] > max_historical_date]
-
-                if len(df_2026_filtered) > 0:
-                    # Filtrovat jen řádky s návštěvností (pro statistiky)
-                    # Pro predikce použijeme i řádky bez návštěvnosti
-                    historical_data = pd.concat(
-                        [historical_data, df_2026_filtered], ignore_index=True
-                    )
+        # Načtení historických dat z databáze pro statistiky
+        if DATABASE_ENABLED:
+            try:
+                db_temp = SessionLocal()
+                historical_records = db_temp.query(HistoricalData).all()
+                
+                if len(historical_records) > 0:
+                    # Konvertovat na pandas DataFrame pro kompatibilitu
+                    historical_data = pd.DataFrame([{
+                        'date': record.date,
+                        'total_visitors': record.total_visitors,
+                        'school_visitors': record.school_visitors,
+                        'public_visitors': record.public_visitors,
+                        'is_weekend': record.is_weekend,
+                        'is_holiday': record.is_holiday,
+                        'is_nice_weather': record.is_nice_weather,
+                        'temperature_mean': record.temperature_mean,
+                        'precipitation': record.precipitation
+                    } for record in historical_records])
+                    historical_data['date'] = pd.to_datetime(historical_data['date'])
+                    
                     print(
-                        f"   - 2026 template: {len(df_2026_filtered)} řádků (holiday features předvyplněny)"
+                        f"   - Historická data z DB: {len(historical_data)} záznamů (do {historical_data['date'].max().date()})"
                     )
-            else:
-                print(f"   ⚠️ 2026 template nenalezen: {template_2026_path}")
-        except Exception as e:
-            print(f"   ⚠️ Historická data nenačtena: {e}")
+                else:
+                    print(f"   ⚠️ Žádná historická data v DB")
+                    historical_data = None
+                
+                db_temp.close()
+            except Exception as e:
+                print(f"   ⚠️ Historická data nenačtena z DB: {e}")
+                historical_data = None
+        else:
             historical_data = None
 
         print("✅ Všechny modely úspěšně načteny")
@@ -563,29 +622,54 @@ async def predict(
                        f"Predikce jsou povoleny pouze pro budoucí data."
             )
         
-        # Zkusit najít datum v historických datech (může obsahovat předvyplněné holiday features)
+        # Zkusit najít datum v template_data (může obsahovat předvyplněné holiday features)
         existing_row = None
-        if historical_data is not None:
-            existing_row_df = historical_data[
-                historical_data["date"] == pd.to_datetime(pred_date)
-            ]
-            if not existing_row_df.empty:
-                existing_row = existing_row_df.iloc[0].to_dict()
+        if DATABASE_ENABLED and db is not None:
+            template_record = db.query(TemplateData).filter(
+                TemplateData.date == pred_date
+            ).first()
+            
+            if template_record:
+                # Konvertovat SQLAlchemy objekt na dict
+                existing_row = {
+                    'date': template_record.date,
+                    'is_holiday': template_record.is_holiday,
+                    'extra': template_record.extra,
+                    'is_spring_break': template_record.is_spring_break,
+                    'is_autumn_break': template_record.is_autumn_break,
+                    'is_winter_break': template_record.is_winter_break,
+                    'is_easter_break': template_record.is_easter_break,
+                    'is_halfyear_break': template_record.is_halfyear_break,
+                    'is_summer_holiday': template_record.is_summer_holiday,
+                    'is_any_school_break': template_record.is_any_school_break,
+                    'school_break_type': template_record.school_break_type,
+                    'days_to_next_break': template_record.days_to_next_break,
+                    'days_from_last_break': template_record.days_from_last_break,
+                    'is_week_before_break': template_record.is_week_before_break,
+                    'is_week_after_break': template_record.is_week_after_break,
+                    'season_exact': template_record.season_exact,
+                    'week_position': template_record.week_position,
+                    'is_month_end': template_record.is_month_end,
+                    'school_week_number': template_record.school_week_number,
+                    'is_bridge_day': template_record.is_bridge_day,
+                    'long_weekend_length': template_record.long_weekend_length,
+                    'is_event': template_record.is_event,
+                }
                 print(
-                    f"   ℹ️ Datum {pred_date} nalezeno v datech (použiji předvyplněné holiday features)"
+                    f"   ℹ️ Datum {pred_date} nalezeno v DB template (použiji předvyplněné holiday features)"
                 )
 
         # Auto-detekce svátku (pokud není zadán A není v datech)
         if request.is_holiday is None:
             if existing_row and "is_holiday" in existing_row:
-                # Použít hodnotu z CSV
+                # Použít hodnotu z DB template
                 is_holiday = bool(existing_row["is_holiday"])
                 holiday_name = (
                     existing_row.get("extra")
-                    if pd.notna(existing_row.get("extra"))
+                    if existing_row.get("extra") is not None
                     else None
                 )
-                print(f"   ✓ Holiday info z CSV: is_holiday={is_holiday}")
+                print(f"   ✓ Holiday info z DB template: is_holiday={is_holiday}")
             else:
                 # Fallback na holiday_service
                 holiday_info = holiday_service.get_holiday_info(pred_date)
@@ -619,9 +703,9 @@ async def predict(
             )
 
         # Vytvoření DataFrame pro predikci
-        # Pokud máme existující řádek z CSV, použijeme ho jako základ
+        # Pokud máme existující řádek z DB, použijeme ho jako základ
         if existing_row:
-            # Použít existující řádek a přepsat jen weather data a opening_hours
+            # Použít existující řádek z DB a přepsat jen weather data a opening_hours
             df_pred = pd.DataFrame([existing_row])
             df_pred["date"] = pd.to_datetime(df_pred["date"])
 
@@ -632,9 +716,9 @@ async def predict(
             # Aktualizovat opening_hours
             df_pred["opening_hours"] = request.opening_hours
 
-            print(f"   ✓ Použity předvyplněné holiday features z CSV")
+            print(f"   ✓ Použity předvyplněné holiday features z DB")
         else:
-            # Vytvořit nový řádek (fallback pro data mimo 2026 template)
+            # Vytvořit nový řádek (fallback pro data mimo template_data)
             df_pred = pd.DataFrame(
                 {
                     "date": [pd.to_datetime(pred_date)],
@@ -647,7 +731,7 @@ async def predict(
                     **{k: [v] for k, v in weather_data.items()},
                 }
             )
-            print(f"   ⚠️ Datum nenalezeno v CSV, vytvářím nový řádek")
+            print(f"   ⚠️ Datum nenalezeno v DB template, vytvářím nový řádek")
 
         # create_features přidá časové features, školní prázdniny, odvozené features atd.
         df_pred = create_features(df_pred)
@@ -1012,68 +1096,47 @@ async def get_historical_from_db(
 ):
     """
     Získá historická data z databáze.
-
-    Pokud není databáze dostupná, použije se fallback na CSV.
     """
-    if DATABASE_ENABLED and db is not None:
-        try:
-            query = db.query(HistoricalData)
-
-            if start_date:
-                start = pd.to_datetime(start_date).date()
-                query = query.filter(HistoricalData.date >= start)
-
-            if end_date:
-                end = pd.to_datetime(end_date).date()
-                query = query.filter(HistoricalData.date <= end)
-
-            records = query.order_by(HistoricalData.date.desc()).limit(limit).all()
-
-            results = []
-            for record in records:
-                results.append(
-                    {
-                        "date": record.date.isoformat(),
-                        "visitors": record.total_visitors,
-                        "school_visitors": record.school_visitors,
-                        "public_visitors": record.public_visitors,
-                        "day_of_week": record.day_of_week,
-                        "temperature_mean": record.temperature_mean,
-                        "precipitation": record.precipitation,
-                        "is_weekend": record.is_weekend,
-                        "is_holiday": record.is_holiday,
-                        "is_nice_weather": record.is_nice_weather,
-                    }
-                )
-
-            return {"source": "database", "data": results, "count": len(results)}
-        except Exception as e:
-            print(f"⚠️ Database query failed: {e}")
-            # Fallback na CSV
-
-    # Fallback pokud databáze není dostupná
-    if historical_data is not None:
-        df = historical_data.copy()
+    if not DATABASE_ENABLED or db is None:
+        raise HTTPException(status_code=503, detail="Databáze není dostupná")
+    
+    try:
+        query = db.query(HistoricalData)
 
         if start_date:
-            df = df[df["date"] >= pd.to_datetime(start_date)]
-        if end_date:
-            df = df[df["date"] <= pd.to_datetime(end_date)]
+            start = pd.to_datetime(start_date).date()
+            query = query.filter(HistoricalData.date >= start)
 
-        df = df.tail(limit)
+        if end_date:
+            end = pd.to_datetime(end_date).date()
+            query = query.filter(HistoricalData.date <= end)
+
+        records = query.order_by(HistoricalData.date.desc()).limit(limit).all()
 
         results = []
-        for _, row in df.iterrows():
+        for record in records:
             results.append(
                 {
-                    "date": row["date"].strftime("%Y-%m-%d"),
-                    "visitors": int(row["total_visitors"]),
+                    "date": record.date.isoformat(),
+                    "visitors": record.total_visitors,
+                    "school_visitors": record.school_visitors,
+                    "public_visitors": record.public_visitors,
+                    "day_of_week": record.day_of_week,
+                    "temperature_mean": record.temperature_mean,
+                    "precipitation": record.precipitation,
+                    "is_weekend": record.is_weekend,
+                    "is_holiday": record.is_holiday,
+                    "is_nice_weather": record.is_nice_weather,
                 }
             )
 
-        return {"source": "csv", "data": results, "count": len(results)}
-
-    raise HTTPException(status_code=503, detail="Historická data nejsou dostupná")
+        return {"source": "database", "data": results, "count": len(results)}
+    
+    except Exception as e:
+        raise HTTPException(
+            status_code=500, 
+            detail=f"Chyba při načítání historických dat z databáze: {str(e)}"
+        )
 
 
 @app.get("/analytics/correlation", tags=["Analytics"])
@@ -1316,6 +1379,348 @@ async def get_calendar_heatmap(year: Optional[int] = None):
         raise HTTPException(
             status_code=500, detail=f"Chyba při generování heatmapy: {str(e)}"
         )
+
+
+@app.post("/scraper/events/run", response_model=ScraperRunResponse, tags=["Events"])
+async def run_event_scraper(
+    request: ScraperRunRequest,
+    db: Session = Depends(get_db) if DATABASE_ENABLED else None
+):
+    """
+    Spusti scraper pro hledani eventu v Plzni a okoli.
+    
+    Scrape eventy z vybranych zdroju (GoOut, Plzen.eu) a ulozi je do databaze.
+    Automaticky aktualizuje is_event flag v template_data tabulce.
+    """
+    if not DATABASE_ENABLED or db is None:
+        raise HTTPException(status_code=503, detail="Databaze neni dostupna")
+    
+    try:
+        # Parsovat data
+        start_date = pd.to_datetime(request.start_date).date()
+        end_date = pd.to_datetime(request.end_date).date()
+        
+        if start_date > end_date:
+            raise HTTPException(status_code=400, detail="start_date musi byt pred end_date")
+        
+        # Spustit scraper
+        print(f"Spoustim scraper pro {start_date} - {end_date}")
+        scraped_events = event_scraper_service.scrape_all_sources(start_date, end_date)
+        
+        # Ulozit eventy do databaze
+        events_saved = 0
+        for event_data in scraped_events:
+            try:
+                # Kontrola jestli event uz neexistuje
+                existing = db.query(Event).filter(
+                    Event.event_date == event_data['event_date'],
+                    Event.title == event_data['title']
+                ).first()
+                
+                if not existing:
+                    # Vytvorit novy event
+                    new_event = Event(
+                        event_date=event_data['event_date'],
+                        title=event_data['title'],
+                        description=event_data.get('description'),
+                        venue=event_data.get('venue', 'Plzen'),
+                        category=event_data.get('category', 'obecne'),
+                        expected_attendance=event_data.get('expected_attendance', 'stredni'),
+                        source=event_data['source'],
+                        source_url=event_data.get('source_url'),
+                        impact_level=event_data.get('impact_level', 2),
+                        is_active=True
+                    )
+                    db.add(new_event)
+                    events_saved += 1
+                    
+                    # Aktualizovat template_data is_event flag
+                    update_template_event_flag(db, event_data['event_date'])
+            
+            except Exception as e:
+                print(f"Chyba pri ukladani eventu: {e}")
+                continue
+        
+        db.commit()
+        
+        return {
+            "success": True,
+            "message": f"Scraping dokoncen. Nalezeno {len(scraped_events)} eventu, ulozeno {events_saved} novych.",
+            "events_found": len(scraped_events),
+            "events_saved": events_saved,
+            "date_range": {
+                "start": start_date.isoformat(),
+                "end": end_date.isoformat()
+            },
+            "sources_scraped": request.sources
+        }
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Chyba pri scrapingu: {str(e)}")
+
+
+@app.get("/events", response_model=EventsListResponse, tags=["Events"])
+async def get_events(
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    category: Optional[str] = None,
+    min_impact: Optional[int] = None,
+    limit: int = 100,
+    db: Session = Depends(get_db) if DATABASE_ENABLED else None
+):
+    """
+    Ziska seznam eventu z databaze.
+    
+    Umoznuje filtrovani podle data, kategorie a impact levelu.
+    """
+    if not DATABASE_ENABLED or db is None:
+        raise HTTPException(status_code=503, detail="Databaze neni dostupna")
+    
+    try:
+        query = db.query(Event).filter(Event.is_active == True)
+        
+        # Filtry
+        if start_date:
+            query = query.filter(Event.event_date >= pd.to_datetime(start_date).date())
+        if end_date:
+            query = query.filter(Event.event_date <= pd.to_datetime(end_date).date())
+        if category:
+            query = query.filter(Event.category == category)
+        if min_impact:
+            query = query.filter(Event.impact_level >= min_impact)
+        
+        # Seradit podle data
+        events = query.order_by(Event.event_date).limit(limit).all()
+        
+        # Formatovat odpoved
+        events_list = []
+        for event in events:
+            events_list.append({
+                "id": event.id,
+                "event_date": event.event_date.isoformat(),
+                "title": event.title,
+                "description": event.description,
+                "venue": event.venue,
+                "category": event.category,
+                "expected_attendance": event.expected_attendance,
+                "source": event.source,
+                "source_url": event.source_url,
+                "impact_level": event.impact_level,
+                "is_active": event.is_active,
+                "created_at": event.created_at.isoformat()
+            })
+        
+        date_range_result = None
+        if events:
+            date_range_result = {
+                "start": events[0]["event_date"],
+                "end": events[-1]["event_date"]
+            }
+        
+        return {
+            "events": events_list,
+            "total_count": len(events_list),
+            "date_range": date_range_result
+        }
+    
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Chyba pri nacitani eventu: {str(e)}")
+
+
+@app.get("/events/{date_str}", tags=["Events"])
+async def get_events_for_date(
+    date_str: str,
+    db: Session = Depends(get_db) if DATABASE_ENABLED else None
+):
+    """
+    Ziska vsechny eventy pro konkretni datum.
+    
+    Vrati seznam vsech aktivnich eventu pro dane datum.
+    """
+    if not DATABASE_ENABLED or db is None:
+        raise HTTPException(status_code=503, detail="Databaze neni dostupna")
+    
+    try:
+        event_date = pd.to_datetime(date_str).date()
+        events = get_events_for_date(db, event_date)
+        
+        events_list = []
+        for event in events:
+            events_list.append({
+                "id": event.id,
+                "event_date": event.event_date.isoformat(),
+                "title": event.title,
+                "description": event.description,
+                "venue": event.venue,
+                "category": event.category,
+                "expected_attendance": event.expected_attendance,
+                "source": event.source,
+                "source_url": event.source_url,
+                "impact_level": event.impact_level,
+                "is_active": event.is_active,
+                "created_at": event.created_at.isoformat()
+            })
+        
+        return {
+            "date": date_str,
+            "events": events_list,
+            "count": len(events_list)
+        }
+    
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Chyba pri nacitani eventu: {str(e)}")
+
+
+@app.post("/events", response_model=EventResponse, tags=["Events"])
+async def create_event(
+    event: EventCreate,
+    db: Session = Depends(get_db) if DATABASE_ENABLED else None
+):
+    """
+    Manualne vytvori novy event.
+    
+    Umoznuje rucni pridani eventu, ktery nebyl nalezen scraperem.
+    """
+    if not DATABASE_ENABLED or db is None:
+        raise HTTPException(status_code=503, detail="Databaze neni dostupna")
+    
+    try:
+        event_date = pd.to_datetime(event.event_date).date()
+        
+        # Vytvorit novy event
+        new_event = Event(
+            event_date=event_date,
+            title=event.title,
+            description=event.description,
+            venue=event.venue,
+            category=event.category,
+            expected_attendance=event.expected_attendance,
+            source='manual',
+            source_url=None,
+            impact_level=event.impact_level,
+            is_active=True
+        )
+        
+        db.add(new_event)
+        db.commit()
+        db.refresh(new_event)
+        
+        # Aktualizovat template_data is_event flag
+        update_template_event_flag(db, event_date)
+        
+        return {
+            "id": new_event.id,
+            "event_date": new_event.event_date.isoformat(),
+            "title": new_event.title,
+            "description": new_event.description,
+            "venue": new_event.venue,
+            "category": new_event.category,
+            "expected_attendance": new_event.expected_attendance,
+            "source": new_event.source,
+            "source_url": new_event.source_url,
+            "impact_level": new_event.impact_level,
+            "is_active": new_event.is_active,
+            "created_at": new_event.created_at.isoformat()
+        }
+    
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Chyba pri vytvareni eventu: {str(e)}")
+
+
+@app.patch("/events/{event_id}", response_model=EventResponse, tags=["Events"])
+async def update_event(
+    event_id: int,
+    event_update: EventUpdate,
+    db: Session = Depends(get_db) if DATABASE_ENABLED else None
+):
+    """
+    Aktualizuje existujici event.
+    
+    Umoznuje zmenit detaily eventu.
+    """
+    if not DATABASE_ENABLED or db is None:
+        raise HTTPException(status_code=503, detail="Databaze neni dostupna")
+    
+    try:
+        event = db.query(Event).filter(Event.id == event_id).first()
+        
+        if not event:
+            raise HTTPException(status_code=404, detail=f"Event s ID {event_id} nenalezen")
+        
+        # Aktualizovat pole
+        update_data = event_update.dict(exclude_unset=True)
+        for field, value in update_data.items():
+            setattr(event, field, value)
+        
+        db.commit()
+        db.refresh(event)
+        
+        # Aktualizovat template_data is_event flag
+        update_template_event_flag(db, event.event_date)
+        
+        return {
+            "id": event.id,
+            "event_date": event.event_date.isoformat(),
+            "title": event.title,
+            "description": event.description,
+            "venue": event.venue,
+            "category": event.category,
+            "expected_attendance": event.expected_attendance,
+            "source": event.source,
+            "source_url": event.source_url,
+            "impact_level": event.impact_level,
+            "is_active": event.is_active,
+            "created_at": event.created_at.isoformat()
+        }
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Chyba pri aktualizaci eventu: {str(e)}")
+
+
+@app.delete("/events/{event_id}", tags=["Events"])
+async def delete_event(
+    event_id: int,
+    db: Session = Depends(get_db) if DATABASE_ENABLED else None
+):
+    """
+    Smaze event (nastavi is_active = False).
+    
+    Soft delete - event zustane v databazi, ale nebude se zobrazovat.
+    """
+    if not DATABASE_ENABLED or db is None:
+        raise HTTPException(status_code=503, detail="Databaze neni dostupna")
+    
+    try:
+        event = db.query(Event).filter(Event.id == event_id).first()
+        
+        if not event:
+            raise HTTPException(status_code=404, detail=f"Event s ID {event_id} nenalezen")
+        
+        event_date = event.event_date
+        event.is_active = False
+        
+        db.commit()
+        
+        # Aktualizovat template_data is_event flag
+        update_template_event_flag(db, event_date)
+        
+        return {
+            "success": True,
+            "message": f"Event {event_id} byl deaktivovan",
+            "event_id": event_id
+        }
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Chyba pri mazani eventu: {str(e)}")
 
 
 if __name__ == "__main__":

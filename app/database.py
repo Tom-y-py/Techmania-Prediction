@@ -247,6 +247,41 @@ class Prediction(Base):
     )
 
 
+class Event(Base):
+    """
+    Events in Plzen and surroundings that might impact Techmania visitor numbers.
+    Scraped from various sources (GoOut, Plzen.eu, etc.)
+    """
+    __tablename__ = "events"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    event_date = Column(Date, nullable=False, index=True)
+    
+    # Event details
+    title = Column(String, nullable=False)
+    description = Column(String, nullable=True)
+    venue = Column(String, nullable=True)
+    category = Column(String, nullable=True)  # koncert, sport, festival, veletrh, atd.
+    expected_attendance = Column(String, nullable=True)  # male/stredni/velke/masivni
+    
+    # Source info
+    source = Column(String, nullable=False)  # goout, plzen.eu, custom
+    source_url = Column(String, nullable=True)
+    
+    # Impact assessment
+    impact_level = Column(Integer, default=1)  # 1-5: vliv na navstevnost Techmanie
+    
+    # Metadata
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    is_active = Column(Boolean, default=True)
+    
+    # Index for efficient date queries
+    __table_args__ = (
+        Index('ix_event_date_active', 'event_date', 'is_active'),
+    )
+
+
 def get_db():
     """Dependency for getting database session"""
     db = SessionLocal()
@@ -365,3 +400,76 @@ def get_complete_template_records(db, start_date: date_type = None, end_date: da
         query = query.filter(TemplateData.date <= end_date)
     
     return query.order_by(TemplateData.date).all()
+
+
+def get_events_for_date(db, event_date: date_type):
+    """
+    Get all active events for a specific date.
+    
+    Args:
+        db: Database session
+        event_date: Date to query events for
+    
+    Returns:
+        List of Event objects
+    """
+    return db.query(Event)\
+        .filter(Event.event_date == event_date)\
+        .filter(Event.is_active == True)\
+        .all()
+
+
+def get_events_for_range(db, start_date: date_type, end_date: date_type):
+    """
+    Get all active events for a date range.
+    
+    Args:
+        db: Database session
+        start_date: Start date
+        end_date: End date
+    
+    Returns:
+        List of Event objects
+    """
+    return db.query(Event)\
+        .filter(Event.event_date >= start_date)\
+        .filter(Event.event_date <= end_date)\
+        .filter(Event.is_active == True)\
+        .order_by(Event.event_date)\
+        .all()
+
+
+def update_template_event_flag(db, event_date: date_type) -> bool:
+    """
+    Update template_data is_event flag based on events table.
+    Sets is_event=1 if there are any events for this date.
+    
+    Args:
+        db: Database session
+        event_date: Date to update
+    
+    Returns:
+        bool: True if successfully updated
+    """
+    try:
+        # Check if there are any events for this date
+        events_count = db.query(Event)\
+            .filter(Event.event_date == event_date)\
+            .filter(Event.is_active == True)\
+            .count()
+        
+        # Update template_data
+        template_record = db.query(TemplateData)\
+            .filter(TemplateData.date == event_date)\
+            .first()
+        
+        if template_record:
+            template_record.is_event = 1 if events_count > 0 else 0
+            db.commit()
+            return True
+        
+        return False
+    except Exception as e:
+        db.rollback()
+        print(f"Error updating template event flag: {e}")
+        return False
