@@ -3,6 +3,7 @@ import { Inter } from 'next/font/google'
 import './globals.css'
 import ThemeProvider from '@/components/ThemeProvider'
 import { LocaleProvider } from '@/components/LocaleProvider'
+import AIChat from '@/components/AIChat'
 
 const inter = Inter({ subsets: ['latin'] })
 
@@ -22,6 +23,7 @@ export default function RootLayout({
         <LocaleProvider>
           <ThemeProvider>
             {children}
+            <AIChat />
           </ThemeProvider>
         </LocaleProvider>
       </body>

@@ -7,14 +7,15 @@ import {
   LinearScale,
   PointElement,
   LineElement,
+  BarElement,
   Title,
   Tooltip,
   Legend,
   Filler,
 } from 'chart.js';
-import { Line } from 'react-chartjs-2';
+import { Chart } from 'react-chartjs-2';
 import { api } from '@/lib/api';
-import type { HistoricalDataResponse, TodayVisitorsResponse, TimeRange, RangePredictionResponse } from '@/types/api';
+import type { HistoricalDataResponse, TodayVisitorsResponse, TimeRange, RangePredictionResponse, PredictionHistoryResponse } from '@/types/api';
 import { useTranslations } from '@/lib/i18n';
 
 ChartJS.register(
@@ -22,6 +23,7 @@ ChartJS.register(
   LinearScale,
   PointElement,
   LineElement,
+  BarElement,
   Title,
   Tooltip,
   Legend,
@@ -33,6 +35,7 @@ export default function VisitorChart() {
   const [historicalData, setHistoricalData] = useState<HistoricalDataResponse | null>(null);
   const [todayData, setTodayData] = useState<TodayVisitorsResponse | null>(null);
   const [futureData, setFutureData] = useState<RangePredictionResponse | null>(null);
+  const [predictionHistory, setPredictionHistory] = useState<PredictionHistoryResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [timeRange, setTimeRange] = useState<'week' | 'month' | 'quarter' | 'year'>('month');
@@ -61,6 +64,17 @@ export default function VisitorChart() {
         } catch (todayErr) {
           console.log('Today data not available:', todayErr);
           setTodayData(null);
+        }
+        
+        // Načteme historii predikcí - porovnání predikce vs. realita
+        try {
+          const history = await api.getPredictionHistory(historyDaysMap[timeRange], true);
+          console.log('Prediction history loaded:', history);
+          console.log('Non-future predictions:', history.history.filter(p => !p.is_future).length);
+          setPredictionHistory(history);
+        } catch (historyErr) {
+          console.log('Prediction history not available:', historyErr);
+          setPredictionHistory(null);
         }
         
         // Načteme predikci pouze od dneška dopředu
@@ -135,6 +149,9 @@ export default function VisitorChart() {
       tooltip: {
         callbacks: {
           label: function(context: any) {
+            if (context.parsed.y === null || context.parsed.y === undefined) {
+              return null; // Skryje tooltip pro null hodnoty
+            }
             let label = context.dataset.label || '';
             if (label) {
               label += ': ';
@@ -192,6 +209,9 @@ export default function VisitorChart() {
   const dateMap = new Map<string, {
     historical?: number;
     predicted?: number;
+    historicalPrediction?: number; // Historická predikce pro porovnání
+    historicalPredLower?: number; // Dolní interval historické predikce
+    historicalPredUpper?: number; // Horní interval historické predikce
     lower?: number;
     upper?: number;
   }>();
@@ -200,6 +220,26 @@ export default function VisitorChart() {
   historicalData.data.forEach(d => {
     dateMap.set(d.date, { historical: d.visitors });
   });
+
+  // Přidáme historické predikce (predikce pro datumy, kde máme i skutečná data)
+  predictionHistory?.history.forEach(p => {
+    const existing = dateMap.get(p.date);
+    // Zobrazíme predikci pokud:
+    // 1. Není to budoucnost (skutečná historická predikce)
+    // 2. NEBO pokud máme pro tento datum skutečná data (můžeme porovnat)
+    if (!p.is_future || existing?.historical !== undefined) {
+      dateMap.set(p.date, {
+        ...existing,
+        historicalPrediction: p.predicted,
+        historicalPredLower: p.confidence_lower ?? undefined,
+        historicalPredUpper: p.confidence_upper ?? undefined
+      });
+    }
+  });
+
+  // Debug - kolik historických predikcí máme
+  const historicalPredCount = Array.from(dateMap.values()).filter(v => v.historicalPrediction !== undefined).length;
+  console.log('Historical predictions in dateMap:', historicalPredCount);
 
   // Přidáme predikce - mohou se překrývat s historickými daty
   futureData?.predictions.forEach(p => {
@@ -228,6 +268,18 @@ export default function VisitorChart() {
     dateMap.get(date)?.predicted ?? null
   );
 
+  const historicalPredictions = sortedDates.map(date => 
+    dateMap.get(date)?.historicalPrediction ?? null
+  );
+
+  const historicalPredLower = sortedDates.map(date => 
+    dateMap.get(date)?.historicalPredLower ?? null
+  );
+
+  const historicalPredUpper = sortedDates.map(date => 
+    dateMap.get(date)?.historicalPredUpper ?? null
+  );
+
   const confidenceLower = sortedDates.map(date => 
     dateMap.get(date)?.lower ?? null
   );
@@ -236,8 +288,10 @@ export default function VisitorChart() {
     dateMap.get(date)?.upper ?? null
   );
 
-  // Přidáme dnešní real-time hodnotu pokud je dostupná
-  if (todayData) {
+  // Přidáme dnešní real-time hodnotu pouze pokud jsou to skutečná data (ne predikce)
+  // todayData obsahuje is_historical informaci z API, ale ta se ztratí při transformaci
+  // Proto kontrolujeme, zda datum existuje v historických datech
+  if (todayData && dateMap.has(todayData.date) && dateMap.get(todayData.date)?.historical !== undefined) {
     const todayIndex = sortedDates.indexOf(todayData.date);
     if (todayIndex !== -1) {
       historicalVisitors[todayIndex] = todayData.current_visitors;
@@ -246,18 +300,56 @@ export default function VisitorChart() {
 
   const datasets = [
     {
+      type: 'bar' as const,
       label: t('actualVisitors') || 'Skutečné návštěvy',
       data: historicalVisitors,
       borderColor: 'rgb(0, 102, 204)',
-      backgroundColor: 'rgba(0, 102, 204, 0.1)',
+      backgroundColor: 'rgba(0, 102, 204, 0.6)',
+      borderWidth: 1,
+      borderRadius: 4,
+      order: 2, // Sloupce se vykreslí za liniemi
+    },
+    {
+      type: 'line' as const,
+      label: t('historicalPrediction') || 'Historická predikce',
+      data: historicalPredictions,
+      borderColor: 'rgb(249, 115, 22)', // Oranžová barva
+      backgroundColor: 'rgba(249, 115, 22, 0.1)',
+      borderDash: [3, 3],
       fill: false,
       tension: 0.4,
       borderWidth: 2,
       pointRadius: 3,
       pointHoverRadius: 5,
+      order: 0,
     },
     {
-      label: t('predictedVisitors') || 'Předpověď',
+      type: 'line' as const,
+      label: 'Hist. predikce - horní interval',
+      data: historicalPredUpper,
+      borderColor: 'rgba(249, 115, 22, 0.3)',
+      backgroundColor: 'rgba(249, 115, 22, 0.05)',
+      fill: '+1',
+      tension: 0.4,
+      borderWidth: 1,
+      pointRadius: 0,
+      order: 1,
+    },
+    {
+      type: 'line' as const,
+      label: 'Hist. predikce - dolní interval',
+      data: historicalPredLower,
+      borderColor: 'rgba(249, 115, 22, 0.3)',
+      backgroundColor: 'rgba(249, 115, 22, 0.05)',
+      fill: false,
+      tension: 0.4,
+      borderWidth: 1,
+      pointRadius: 0,
+      order: 1,
+    },
+    {
+      type: 'line' as const,
+      label: t('predictedVisitors') || 'Budoucí předpověď',
       data: predictedVisitors,
       borderColor: 'rgb(34, 197, 94)',
       backgroundColor: 'rgba(34, 197, 94, 0.1)',
@@ -267,8 +359,10 @@ export default function VisitorChart() {
       borderWidth: 2,
       pointRadius: 3,
       pointHoverRadius: 5,
+      order: 0,
     },
     {
+      type: 'line' as const,
       label: t('confidenceUpper') || 'Horní interval',
       data: confidenceUpper,
       borderColor: 'rgba(34, 197, 94, 0.3)',
@@ -277,8 +371,10 @@ export default function VisitorChart() {
       tension: 0.4,
       borderWidth: 1,
       pointRadius: 0,
+      order: 1,
     },
     {
+      type: 'line' as const,
       label: t('confidenceLower') || 'Dolní interval',
       data: confidenceLower,
       borderColor: 'rgba(34, 197, 94, 0.3)',
@@ -287,6 +383,7 @@ export default function VisitorChart() {
       tension: 0.4,
       borderWidth: 1,
       pointRadius: 0,
+      order: 1,
     }
   ];
 
@@ -342,8 +439,8 @@ export default function VisitorChart() {
           </button>
         </div>
 
-        {/* Today's Stats */}
-        {todayData && (
+        {/* Today's Stats - zobrazíme pouze pokud máme skutečná data pro dnešek */}
+        {todayData && historicalData.data.some(d => d.date === todayData.date) ? (
           <div className="text-right">
             <div className="text-sm text-gray-600 dark:text-gray-400">Dnes aktuálně</div>
             <div className="text-2xl font-bold text-gray-900 dark:text-white">
@@ -357,12 +454,62 @@ export default function VisitorChart() {
               Předpověď: {todayData.predicted_visitors.toLocaleString('cs-CZ')}
             </div>
           </div>
+        ) : (
+          <div className="text-right">
+            <div className="text-sm text-gray-600 dark:text-gray-400">Dnes</div>
+            <div className="text-sm text-gray-500 dark:text-gray-400">
+              Žádná data
+            </div>
+          </div>
         )}
       </div>
 
       <div style={{ height: '400px' }}>
-        <Line options={options} data={data} />
+        <Chart type="bar" options={options} data={data} />
       </div>
+
+      {/* Prediction Accuracy Stats */}
+      {predictionHistory && predictionHistory.summary.valid_comparisons > 0 && (
+        <div className="mt-6 pt-4 border-t border-gray-200 dark:border-gray-700">
+          <div className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">
+            {t('predictionAccuracy') || 'Přesnost predikcí'}
+          </div>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            <div className="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-3">
+              <div className="text-xs text-gray-500 dark:text-gray-400">
+                {t('accuracyLabel') || 'Přesnost (±10%)'}
+              </div>
+              <div className="text-lg font-semibold text-green-600 dark:text-green-400">
+                {predictionHistory.summary.accuracy_10_percent?.toFixed(1) || 0}%
+              </div>
+            </div>
+            <div className="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-3">
+              <div className="text-xs text-gray-500 dark:text-gray-400">
+                Přesnost (±20%)
+              </div>
+              <div className="text-lg font-semibold text-blue-600 dark:text-blue-400">
+                {predictionHistory.summary.accuracy_20_percent?.toFixed(1) || 0}%
+              </div>
+            </div>
+            <div className="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-3">
+              <div className="text-xs text-gray-500 dark:text-gray-400">
+                {t('avgError') || 'Průměrná odchylka'}
+              </div>
+              <div className="text-lg font-semibold text-gray-900 dark:text-white">
+                {predictionHistory.summary.avg_error_percent?.toFixed(1) || 0}%
+              </div>
+            </div>
+            <div className="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-3">
+              <div className="text-xs text-gray-500 dark:text-gray-400">
+                Porovnáno dnů
+              </div>
+              <div className="text-lg font-semibold text-gray-900 dark:text-white">
+                {predictionHistory.summary.valid_comparisons}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -125,6 +125,7 @@ class TemplateData(Base):
     public_visitors = Column(Float, nullable=True)
     total_visitors = Column(Float, nullable=True)  # Nullable until completed
     extra = Column(String, nullable=True)
+    opening_hours = Column(String, nullable=True)
     
     # Calendar features - Basic
     is_weekend = Column(Integer)
@@ -273,11 +274,11 @@ def get_next_version(db, prediction_date: date_type) -> int:
 
 def validate_future_date(prediction_date: date_type) -> bool:
     """
-    Validate that the prediction date is in the future.
+    Validate that the prediction date is today or in the future.
     Prevents predictions for past dates.
     """
     today = date_type.today()
-    return prediction_date > today
+    return prediction_date >= today
 
 
 def get_latest_prediction(db, prediction_date: date_type):

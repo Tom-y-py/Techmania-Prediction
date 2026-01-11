@@ -4,17 +4,43 @@ FastAPI backend pro predikci návštěvnosti Techmanie.
 
 from fastapi import FastAPI, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
 from typing import List, Optional, Dict, Any
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 import pandas as pd
 import numpy as np
 import joblib
 import sys
 import os
+import json
+import math
 from pathlib import Path
 from dotenv import load_dotenv
 from sqlalchemy.orm import Session
+
+# Custom JSON encoder pro NaN hodnoty
+class NaNSafeJSONEncoder(json.JSONEncoder):
+    def default(self, obj):
+        if isinstance(obj, float) and (math.isnan(obj) or math.isinf(obj)):
+            return None
+        return super().default(obj)
+
+def sanitize_for_json(obj):
+    """Rekurzivně nahradí NaN a Inf hodnoty None pro JSON serializaci."""
+    if isinstance(obj, dict):
+        return {k: sanitize_for_json(v) for k, v in obj.items()}
+    elif isinstance(obj, list):
+        return [sanitize_for_json(item) for item in obj]
+    elif isinstance(obj, float):
+        if math.isnan(obj) or math.isinf(obj):
+            return None
+        return obj
+    elif isinstance(obj, (np.floating, np.integer)):
+        if np.isnan(obj) or np.isinf(obj):
+            return None
+        return float(obj)
+    return obj
 
 # Načíst proměnné prostředí
 load_dotenv()
@@ -429,6 +455,98 @@ async def models_info():
     return response
 
 
+@app.get("/today", tags=["Predictions"])
+async def get_today_prediction():
+    """
+    Vrátí predikci nebo historická data pro dnešní den.
+    """
+    today = date.today()
+    
+    # Zkusit najít historická data pro dnešek
+    if historical_data is not None:
+        today_data = historical_data[historical_data['date'].dt.date == today]
+        if len(today_data) > 0:
+            row = today_data.iloc[0]
+            visitors_value = row['total_visitors']
+            # Pokud je hodnota validní (není NaN), vrátíme historická data
+            if pd.notna(visitors_value):
+                return {
+                    "date": today.isoformat(),
+                    "visitors": int(visitors_value),
+                    "is_historical": True,
+                    "day_of_week": today.strftime("%A"),
+                    "is_weekend": today.weekday() >= 5,
+                    "is_holiday": holiday_service.is_holiday(today)[0]
+                }
+    
+    # Jinak vrátit predikci pro dnešek
+    try:
+        # Získat počasí
+        weather_data = weather_service.get_weather(today)
+        
+        # Zkusit najít existující řádek v historických datech (pro holiday features atd.)
+        existing_row = None
+        if historical_data is not None:
+            existing_row_df = historical_data[historical_data["date"] == pd.to_datetime(today)]
+            if not existing_row_df.empty:
+                existing_row = existing_row_df.iloc[0].to_dict()
+        
+        # Vytvořit DataFrame pro predikci
+        if existing_row:
+            df_pred = pd.DataFrame([existing_row])
+            df_pred["date"] = pd.to_datetime(df_pred["date"])
+            # Aktualizovat weather data z API
+            for k, v in weather_data.items():
+                if k != 'date':
+                    df_pred[k] = v
+        else:
+            df_pred = pd.DataFrame({
+                "date": [pd.to_datetime(today)],
+                "total_visitors": [np.nan],
+                **{k: [v] for k, v in weather_data.items() if k != 'date'},
+            })
+        
+        # Přidat features
+        df_pred = create_features(df_pred)
+        
+        # Vybrat pouze features, které model očekává
+        available_features = [col for col in feature_columns if col in df_pred.columns]
+        X_pred = df_pred[available_features].copy()
+        
+        # Doplnit chybějící features
+        for col in feature_columns:
+            if col not in X_pred.columns:
+                X_pred[col] = 0
+        
+        X_pred = X_pred.fillna(0)
+        X_pred = X_pred[feature_columns]
+        
+        # Predikce
+        prediction = make_ensemble_prediction(X_pred)[0]
+        prediction = int(np.round(prediction))
+        
+        is_holiday_result = holiday_service.is_holiday(today)
+        
+        return {
+            "date": today.isoformat(),
+            "visitors": prediction,
+            "is_historical": False,
+            "day_of_week": today.strftime("%A"),
+            "is_weekend": today.weekday() >= 5,
+            "is_holiday": is_holiday_result[0],
+            "weather": {
+                "temperature_mean": weather_data.get("temperature_mean"),
+                "precipitation": weather_data.get("precipitation"),
+                "weather_description": weather_data.get("weather_description", "N/A"),
+            }
+        }
+    except Exception as e:
+        print(f"❌ Chyba při predikci pro dnešek: {e}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Chyba při predikci: {str(e)}")
+
+
 @app.get("/stats", response_model=StatsResponse, tags=["Statistics"])
 async def get_statistics():
     """
@@ -438,50 +556,45 @@ async def get_statistics():
         raise HTTPException(status_code=503, detail="Historická data nejsou dostupná")
 
     try:
-        # Odfiltrovat NaN hodnoty
+        # Odfiltrovat NaN hodnoty - pracujeme pouze s čistými daty
         clean_data = historical_data.dropna(subset=['total_visitors'])
         
         if len(clean_data) == 0:
             raise HTTPException(status_code=503, detail="Žádná platná data nejsou k dispozici")
         
-        # Výpočet statistik
-        total_visitors = int(historical_data["total_visitors"].sum())
-        avg_daily = float(historical_data["total_visitors"].mean())
+        # Výpočet statistik z čistých dat
+        total_visitors = int(clean_data["total_visitors"].sum())
+        avg_daily = float(clean_data["total_visitors"].mean())
 
         # Najít den s nejvyšší návštěvností
-        peak_idx = historical_data["total_visitors"].idxmax()
-        peak_day = historical_data.loc[peak_idx, "date"].strftime("%d. %B %Y")
-        peak_visitors = int(historical_data.loc[peak_idx, "total_visitors"])
+        peak_idx = clean_data["total_visitors"].idxmax()
+        peak_day = clean_data.loc[peak_idx, "date"].strftime("%d. %B %Y")
+        peak_visitors = int(clean_data.loc[peak_idx, "total_visitors"])
 
-        # Vypočítat trend (poslední měsíc vs předchozí měsíc)
-        last_month = historical_data.tail(30)
+        # Vypočítat trend (poslední měsíc vs předchozí měsíc) - pouze z čistých dat
+        last_month = clean_data.tail(30)
         prev_month = (
-            historical_data.iloc[-60:-30]
-            if len(historical_data) >= 60
-            else historical_data.head(30)
+            clean_data.iloc[-60:-30]
+            if len(clean_data) >= 60
+            else clean_data.head(30)
         )
 
-        if len(prev_month) > 0:
-            trend = (
-                (
-                    last_month["total_visitors"].mean()
-                    - prev_month["total_visitors"].mean()
-                )
-                / prev_month["total_visitors"].mean()
-                * 100
-            )
-        else:
-            trend = 0.0
+        trend = 0.0
+        if len(prev_month) > 0 and len(last_month) > 0:
+            last_avg = last_month["total_visitors"].mean()
+            prev_avg = prev_month["total_visitors"].mean()
+            if pd.notna(last_avg) and pd.notna(prev_avg) and prev_avg > 0:
+                trend = ((last_avg - prev_avg) / prev_avg) * 100
 
-        return {
+        return sanitize_for_json({
             "total_visitors": total_visitors,
             "avg_daily_visitors": avg_daily,
             "peak_day": peak_day,
             "peak_visitors": peak_visitors,
             "trend": round(trend, 1),
-            "data_start_date": historical_data["date"].min().strftime("%Y-%m-%d"),
-            "data_end_date": historical_data["date"].max().strftime("%Y-%m-%d"),
-        }
+            "data_start_date": clean_data["date"].min().strftime("%Y-%m-%d"),
+            "data_end_date": clean_data["date"].max().strftime("%Y-%m-%d"),
+        })
     except HTTPException:
         raise
     except Exception as e:
@@ -533,6 +646,145 @@ async def get_historical_data(days: int = 30):
         raise HTTPException(status_code=500, detail=f"Chyba při načítání dat: {str(e)}")
 
 
+# Pydantic modely pro kalendář
+class CalendarEvent(BaseModel):
+    date: str
+    name: str
+    type: str  # holiday, vacation, high_traffic
+    predicted_visitors: Optional[int] = None
+    day_of_week: Optional[str] = None
+
+
+class CalendarEventsResponse(BaseModel):
+    events: List[CalendarEvent]
+    month: int
+    year: int
+    total_events: int
+
+
+@app.get("/calendar/events", response_model=CalendarEventsResponse, tags=["Calendar"])
+async def get_calendar_events(month: int = None, year: int = None):
+    """
+    Získá události (svátky, prázdniny) pro daný měsíc.
+    Pokud month/year nejsou zadány, použije aktuální měsíc.
+    """
+    from datetime import date as date_type
+    import calendar as cal_module
+    
+    # Default na aktuální měsíc
+    today = date_type.today()
+    if month is None:
+        month = today.month
+    if year is None:
+        year = today.year
+    
+    # Validace
+    if month < 1 or month > 12:
+        raise HTTPException(status_code=400, detail="Měsíc musí být mezi 1 a 12")
+    if year < 2020 or year > 2030:
+        raise HTTPException(status_code=400, detail="Rok musí být mezi 2020 a 2030")
+    
+    events = []
+    day_of_week_names = {
+        0: 'Pondělí', 1: 'Úterý', 2: 'Středa', 3: 'Čtvrtek',
+        4: 'Pátek', 5: 'Sobota', 6: 'Neděle'
+    }
+    vacation_names = {
+        'winter': 'Vánoční prázdniny',
+        'halfyear': 'Pololetní prázdniny',
+        'spring': 'Jarní prázdniny',
+        'easter': 'Velikonoční prázdniny',
+        'summer': 'Letní prázdniny',
+        'autumn': 'Podzimní prázdniny',
+    }
+    
+    try:
+        _, num_days = cal_module.monthrange(year, month)
+        
+        # Načíst data z databáze (TemplateData pro 2026)
+        if DATABASE_ENABLED:
+            db = next(get_db())
+            try:
+                start_str = f"{year}-{month:02d}-01"
+                end_str = f"{year}-{month:02d}-{num_days:02d}"
+                
+                template_records = db.query(TemplateData).filter(
+                    TemplateData.date >= start_str,
+                    TemplateData.date <= end_str
+                ).all()
+                
+                for record in template_records:
+                    record_date = date_type.fromisoformat(str(record.date))
+                    day_of_week = day_of_week_names.get(record_date.weekday(), '')
+                    
+                    # Svátky
+                    if record.is_holiday == 1 and record.nazvy_svatek:
+                        events.append(CalendarEvent(
+                            date=str(record.date),
+                            name=record.nazvy_svatek,
+                            type='holiday',
+                            day_of_week=day_of_week
+                        ))
+                    
+                    # Prázdniny
+                    if record.school_break_type and record.school_break_type.strip():
+                        vacation_name = vacation_names.get(record.school_break_type, record.school_break_type)
+                        events.append(CalendarEvent(
+                            date=str(record.date),
+                            name=vacation_name,
+                            type='vacation',
+                            day_of_week=day_of_week
+                        ))
+                    
+                    # Extra události (pokud nejsou stejné jako svátek)
+                    if record.extra and record.extra.strip() and record.extra != record.nazvy_svatek:
+                        events.append(CalendarEvent(
+                            date=str(record.date),
+                            name=record.extra,
+                            type='event',
+                            day_of_week=day_of_week
+                        ))
+            finally:
+                db.close()
+        
+        # Fallback - použít holiday_service
+        if not events:
+            for day in range(1, num_days + 1):
+                current_date = date_type(year, month, day)
+                is_holiday, holiday_name = holiday_service.is_holiday(current_date)
+                
+                if is_holiday and holiday_name:
+                    events.append(CalendarEvent(
+                        date=current_date.isoformat(),
+                        name=holiday_name,
+                        type='holiday',
+                        day_of_week=day_of_week_names.get(current_date.weekday(), '')
+                    ))
+        
+        # Deduplikovat
+        seen = set()
+        unique_events = []
+        for event in events:
+            key = (event.date, event.type, event.name)
+            if key not in seen:
+                seen.add(key)
+                unique_events.append(event)
+        
+        unique_events.sort(key=lambda x: x.date)
+        
+        return CalendarEventsResponse(
+            events=unique_events,
+            month=month,
+            year=year,
+            total_events=len(unique_events)
+        )
+        
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Chyba při načítání událostí: {str(e)}")
+
+
 @app.post("/predict", response_model=PredictionResponse, tags=["Predictions"])
 async def predict(
     request: PredictionRequest,
@@ -546,6 +798,7 @@ async def predict(
     Uloží predikci do databáze s verzováním.
     
     DŮLEŽITÉ: Nepřijímá predikce do minulosti (pouze budoucí data).
+    MAX 16 DNÍ DOPŘEDU (limit Weather API).
     """
     if not models:
         raise HTTPException(status_code=503, detail="Modely nejsou načteny")
@@ -553,14 +806,24 @@ async def predict(
     try:
         # Parsování data
         pred_date = pd.to_datetime(request.date).date()
+        today = date.today()
         
         # ========== VALIDACE: ZAKÁZAT PREDIKCE DO MINULOSTI ==========
         if DATABASE_ENABLED and not validate_future_date(pred_date):
-            today = date.today()
             raise HTTPException(
                 status_code=400,
                 detail=f"Nelze vytvořit predikci do minulosti. Požadované datum: {pred_date}, Dnešní datum: {today}. "
                        f"Predikce jsou povoleny pouze pro budoucí data."
+            )
+        
+        # ========== VALIDACE: MAX 16 DNÍ DOPŘEDU (LIMIT WEATHER API) ==========
+        days_ahead = (pred_date - today).days
+        if days_ahead > 16:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Nelze vytvořit predikci více než 16 dní dopředu (Weather API limit). "
+                       f"Požadované datum: {pred_date} ({days_ahead} dní dopředu). "
+                       f"Maximální datum: {today + timedelta(days=16)}"
             )
         
         # Zkusit najít datum v historických datech (může obsahovat předvyplněné holiday features)
@@ -768,14 +1031,24 @@ async def predict(
 @app.post(
     "/predict/range", response_model=RangePredictionResponse, tags=["Predictions"]
 )
-async def predict_range(request: RangePredictionRequest):
+async def predict_range(
+    request: RangePredictionRequest, 
+    backtest: bool = False,
+    db: Session = Depends(get_db) if DATABASE_ENABLED else None
+):
     """
     Predikce návštěvnosti pro časové období.
 
     Vytvoří predikce pro každý den v zadaném období.
     Automaticky stahuje weather data pro každý den z Open-Meteo API.
     
-    DŮLEŽITÉ: Nepřijímá predikce do minulosti (pouze budoucí data).
+    Parametry:
+    - backtest: Pokud True, povolí predikce pro historická data (pro testování přesnosti modelu)
+    
+    DŮLEŽITÉ: 
+    - Bez backtest=True nepřijímá predikce do minulosti
+    - MAX 16 DNÍ DOPŘEDU pro budoucí data (limit Weather API forecast)
+    - Pro historická data (backtest) se použije Archive API
     """
     if not models:
         raise HTTPException(status_code=503, detail="Modely nejsou načteny")
@@ -785,18 +1058,39 @@ async def predict_range(request: RangePredictionRequest):
 
         start_date = pd.to_datetime(request.start_date)
         end_date = pd.to_datetime(request.end_date)
+        today = date.today()
 
         if start_date > end_date:
             raise HTTPException(status_code=400, detail="start_date musí být před end_date")
         
-        # ========== VALIDACE: ZAKÁZAT PREDIKCE DO MINULOSTI ==========
-        if DATABASE_ENABLED:
-            today = date.today()
-            if start_date.date() <= today:
+        # ========== VALIDACE PRO BACKTEST VS NORMÁLNÍ PREDIKCE ==========
+        if backtest:
+            # Backtest mode - povoleno pro historická data
+            # Kontrola, že data jsou v minulosti (jinak nemá backtest smysl)
+            if end_date.date() > today:
                 raise HTTPException(
                     status_code=400,
-                    detail=f"Nelze vytvořit predikci do minulosti. Start datum: {start_date.date()}, Dnešní datum: {today}. "
-                           f"Predikce jsou povoleny pouze pro budoucí data. Použijte start_date > {today}."
+                    detail=f"Backtest je pouze pro historická data. End datum: {end_date.date()} je v budoucnosti."
+                )
+            print(f"🔬 BACKTEST MODE: Vytváření predikcí pro historická data {start_date.date()} - {end_date.date()}")
+        else:
+            # Normální mode - pouze budoucí data
+            if DATABASE_ENABLED:
+                if start_date.date() < today:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"Nelze vytvořit predikci do minulosti. Start datum: {start_date.date()}, Dnešní datum: {today}. "
+                               f"Predikce jsou povoleny pouze pro dnešek a budoucí data. "
+                               f"Pro historická data použijte parametr backtest=true"
+                    )
+            
+            # ========== VALIDACE: MAX 16 DNÍ DOPŘEDU (LIMIT WEATHER API) ==========
+            max_date = today + timedelta(days=16)
+            if end_date.date() > max_date:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Nelze vytvořit predikci více než 16 dní dopředu (Weather API limit). "
+                           f"End datum: {end_date.date()}, Maximální datum: {max_date}"
                 )
         
         # Použít funkci z predict.py která automaticky stahuje weather data
@@ -864,6 +1158,41 @@ async def predict_range(request: RangePredictionRequest):
                     "is_weekend": row["date"].dayofweek >= 5,
                 }
             )
+            
+            # Uložit predikci do databáze
+            if DATABASE_ENABLED and db is not None:
+                try:
+                    version = get_next_version(db, pred_date)
+                    db_prediction = Prediction(
+                        prediction_date=pred_date,
+                        predicted_visitors=prediction_value,
+                        temperature_mean=weather_data.get("temperature_mean"),
+                        precipitation=weather_data.get("precipitation"),
+                        wind_speed_max=weather_data.get("wind_speed_max"),
+                        is_rainy=1 if weather_data.get("is_rainy", False) else 0,
+                        is_snowy=1 if weather_data.get("is_snowy", False) else 0,
+                        is_nice_weather=1 if weather_data.get("is_nice_weather", False) else 0,
+                        day_of_week=day_name_cs,
+                        is_weekend=1 if row["date"].dayofweek >= 5 else 0,
+                        is_holiday=1 if holiday_info_data["is_holiday"] else 0,
+                        model_name="ensemble",
+                        confidence_lower=int(prediction_value * 0.85),
+                        confidence_upper=int(prediction_value * 1.15),
+                        version=version,
+                        created_by="api_range" if not backtest else "api_backtest",
+                    )
+                    db.add(db_prediction)
+                except Exception as e:
+                    print(f"⚠️ Failed to save prediction for {pred_date}: {e}")
+        
+        # Commit všech predikcí najednou
+        if DATABASE_ENABLED and db is not None:
+            try:
+                db.commit()
+                print(f"✅ Saved {len(predictions)} predictions to database")
+            except Exception as e:
+                print(f"⚠️ Failed to commit predictions: {e}")
+                db.rollback()
 
         total = int(results_df["prediction"].sum())
 
@@ -1139,10 +1468,11 @@ async def get_correlation_analysis():
             correlations["weather_correlation"] = 0.0
             correlations["temperature_correlation"] = 0.0
 
-        return {
+        response_data = {
             "correlations": correlations,
             "description": "Korelační koeficienty a multiplikátory vypočtené z historických dat",
         }
+        return sanitize_for_json(response_data)
     except Exception as e:
         print(f"Error in correlation analysis: {str(e)}")
         import traceback
@@ -1231,14 +1561,142 @@ async def get_seasonality_analysis():
                     "difference": holiday_avg - regular_avg,
                 }
 
-        return {
+        response_data = {
             "by_weekday": weekday_pattern,
             "by_month": monthly_pattern,
             "holiday_vs_regular": holiday_vs_regular,
         }
+        return sanitize_for_json(response_data)
     except Exception as e:
         raise HTTPException(
             status_code=500, detail=f"Chyba při výpočtu sezónnosti: {str(e)}"
+        )
+
+
+@app.get("/analytics/prediction-history", tags=["Analytics"])
+async def get_prediction_history(
+    days: int = 30,
+    include_future: bool = True,
+    db: Session = Depends(get_db) if DATABASE_ENABLED else None
+):
+    """
+    Získá historii predikcí s porovnáním skutečných hodnot.
+    Umožňuje sledovat, jak přesné byly predikce oproti realitě.
+    
+    - days: počet dní do minulosti
+    - include_future: zda zahrnout i budoucí predikce (bez porovnání)
+    """
+    if not DATABASE_ENABLED or db is None:
+        raise HTTPException(status_code=503, detail="Databáze není dostupná")
+    
+    try:
+        from datetime import timedelta
+        
+        today = date.today()
+        cutoff_date = today - timedelta(days=days)
+        
+        # Získat predikce - buď jen historické nebo včetně budoucích
+        if include_future:
+            predictions = db.query(Prediction)\
+                .filter(Prediction.prediction_date >= cutoff_date)\
+                .order_by(Prediction.prediction_date.desc(), Prediction.version.desc())\
+                .all()
+        else:
+            predictions = db.query(Prediction)\
+                .filter(Prediction.prediction_date >= cutoff_date)\
+                .filter(Prediction.prediction_date <= today)\
+                .order_by(Prediction.prediction_date.desc(), Prediction.version.desc())\
+                .all()
+        
+        if not predictions:
+            return {
+                "history": [],
+                "summary": {
+                    "total_predictions": 0,
+                    "avg_error": None,
+                    "avg_error_percent": None,
+                    "predictions_within_10_percent": 0,
+                    "predictions_within_20_percent": 0
+                }
+            }
+        
+        # Získat skutečné hodnoty z historických dat
+        history = []
+        total_error = 0
+        total_error_percent = 0
+        within_10 = 0
+        within_20 = 0
+        valid_comparisons = 0
+        
+        for pred in predictions:
+            pred_date = pred.prediction_date
+            is_future = pred_date > today
+            
+            # Najít skutečnou hodnotu (pouze pro minulé/dnešní datum)
+            actual_value = None
+            if not is_future and historical_data is not None:
+                actual_row = historical_data[historical_data['date'].dt.date == pred_date]
+                if len(actual_row) > 0 and pd.notna(actual_row.iloc[0]['total_visitors']):
+                    actual_value = int(actual_row.iloc[0]['total_visitors'])
+            
+            # Vypočítat chybu
+            error = None
+            error_percent = None
+            if actual_value is not None:
+                error = pred.predicted_visitors - actual_value
+                error_percent = (error / actual_value * 100) if actual_value > 0 else 0
+                
+                total_error += abs(error)
+                total_error_percent += abs(error_percent)
+                valid_comparisons += 1
+                
+                if abs(error_percent) <= 10:
+                    within_10 += 1
+                if abs(error_percent) <= 20:
+                    within_20 += 1
+            
+            history.append({
+                "date": pred_date.isoformat(),
+                "predicted": pred.predicted_visitors,
+                "actual": actual_value,
+                "error": error,
+                "error_percent": round(error_percent, 1) if error_percent is not None else None,
+                "version": pred.version,
+                "created_at": pred.created_at.isoformat() if pred.created_at else None,
+                "confidence_lower": pred.confidence_lower,
+                "confidence_upper": pred.confidence_upper,
+                "within_confidence": (
+                    actual_value is not None and 
+                    pred.confidence_lower is not None and 
+                    pred.confidence_upper is not None and
+                    pred.confidence_lower <= actual_value <= pred.confidence_upper
+                ),
+                "is_future": is_future
+            })
+        
+        # Souhrn
+        summary = {
+            "total_predictions": len(predictions),
+            "valid_comparisons": valid_comparisons,
+            "avg_error": round(total_error / valid_comparisons, 1) if valid_comparisons > 0 else None,
+            "avg_error_percent": round(total_error_percent / valid_comparisons, 1) if valid_comparisons > 0 else None,
+            "predictions_within_10_percent": within_10,
+            "predictions_within_20_percent": within_20,
+            "accuracy_10_percent": round(within_10 / valid_comparisons * 100, 1) if valid_comparisons > 0 else None,
+            "accuracy_20_percent": round(within_20 / valid_comparisons * 100, 1) if valid_comparisons > 0 else None
+        }
+        
+        return sanitize_for_json({
+            "history": history,
+            "summary": summary
+        })
+        
+    except Exception as e:
+        print(f"Error in prediction history: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(
+            status_code=500, detail=f"Chyba při získávání historie predikcí: {str(e)}"
         )
 
 
@@ -1254,10 +1712,13 @@ async def get_calendar_heatmap(year: Optional[int] = None):
     try:
         # Zajistit, že date je datetime
         historical_data["date"] = pd.to_datetime(historical_data["date"])
+        
+        # Filtrovat pouze řádky s platnými hodnotami visitors (bez NaN)
+        clean_data = historical_data.dropna(subset=['total_visitors'])
 
         if year is not None:
             # Filtrovat data pro daný rok
-            year_data = historical_data[historical_data["date"].dt.year == year].copy()
+            year_data = clean_data[clean_data["date"].dt.year == year].copy()
 
             if len(year_data) == 0:
                 return {
@@ -1266,7 +1727,7 @@ async def get_calendar_heatmap(year: Optional[int] = None):
                     "min_visitors": 0,
                     "max_visitors": 0,
                     "available_years": sorted(
-                        historical_data["date"].dt.year.unique().tolist()
+                        clean_data["date"].dt.year.unique().tolist()
                     ),
                 }
 
@@ -1286,13 +1747,13 @@ async def get_calendar_heatmap(year: Optional[int] = None):
                 "min_visitors": int(year_data["total_visitors"].min()),
                 "max_visitors": int(year_data["total_visitors"].max()),
                 "available_years": sorted(
-                    historical_data["date"].dt.year.unique().tolist()
+                    clean_data["date"].dt.year.unique().tolist()
                 ),
             }
         else:
-            # Vrátit data pro všechny roky
+            # Vrátit data pro všechny roky (bez NaN)
             all_data = []
-            for _, row in historical_data.iterrows():
+            for _, row in clean_data.iterrows():
                 all_data.append(
                     {
                         "date": row["date"].strftime("%Y-%m-%d"),
@@ -1302,10 +1763,10 @@ async def get_calendar_heatmap(year: Optional[int] = None):
 
             return {
                 "data": all_data,
-                "min_visitors": int(historical_data["total_visitors"].min()),
-                "max_visitors": int(historical_data["total_visitors"].max()),
+                "min_visitors": int(clean_data["total_visitors"].min()),
+                "max_visitors": int(clean_data["total_visitors"].max()),
                 "available_years": sorted(
-                    historical_data["date"].dt.year.unique().tolist()
+                    clean_data["date"].dt.year.unique().tolist()
                 ),
             }
     except Exception as e:
@@ -1318,6 +1779,101 @@ async def get_calendar_heatmap(year: Optional[int] = None):
         )
 
 
+# ==================== AI CHAT ====================
+
+class ChatMessage(BaseModel):
+    message: str = Field(..., description="Zpráva od uživatele")
+    history: Optional[List[Dict[str, str]]] = Field(default=None, description="Historie konverzace")
+
+
+class ChatResponse(BaseModel):
+    response: str
+    context_used: bool = True
+
+
+@app.post("/chat", tags=["AI Chat"])
+async def chat_endpoint(
+    request: ChatMessage,
+    db: Session = Depends(get_db) if DATABASE_ENABLED else None
+):
+    """
+    AI Chat endpoint pro dotazy na data o návštěvnosti.
+    Vrací odpověď jako streaming (Server-Sent Events).
+    """
+    try:
+        from chat import chat_stream
+        
+        def generate():
+            try:
+                for chunk in chat_stream(request.message, db, request.history):
+                    # SSE formát
+                    yield f"data: {json.dumps({'content': chunk})}\n\n"
+            except Exception as e:
+                yield f"data: {json.dumps({'content': f'❌ Chyba: {str(e)}'})}\n\n"
+            yield "data: [DONE]\n\n"
+        
+        return StreamingResponse(
+            generate(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                "X-Accel-Buffering": "no"
+            }
+        )
+    except ImportError as e:
+        raise HTTPException(status_code=500, detail=f"Chat modul není dostupný: {str(e)}")
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Chyba chatu: {str(e)}")
+
+
+@app.post("/chat/sync", response_model=ChatResponse, tags=["AI Chat"])
+async def chat_sync_endpoint(
+    request: ChatMessage,
+    db: Session = Depends(get_db) if DATABASE_ENABLED else None
+):
+    """
+    Synchronní verze AI chatu (bez streamování).
+    Vrací celou odpověď najednou.
+    """
+    try:
+        from chat import chat_sync
+        
+        response = chat_sync(request.message, db, request.history)
+        return ChatResponse(response=response)
+    except ImportError:
+        raise HTTPException(status_code=500, detail="Chat modul není dostupný")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Chyba chatu: {str(e)}")
+
+
+@app.get("/chat/tools", tags=["AI Chat"])
+async def get_chat_tools():
+    """
+    Vrátí seznam dostupných MCP nástrojů pro AI chat.
+    """
+    try:
+        from mcp_tools import MCP_TOOLS
+        
+        tools_summary = []
+        for tool in MCP_TOOLS:
+            func = tool.get("function", {})
+            tools_summary.append({
+                "name": func.get("name"),
+                "description": func.get("description"),
+                "parameters": list(func.get("parameters", {}).get("properties", {}).keys())
+            })
+        
+        return {
+            "tools_count": len(MCP_TOOLS),
+            "tools": tools_summary
+        }
+    except ImportError:
+        raise HTTPException(status_code=500, detail="MCP tools modul není dostupný")
+
+
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=5000)
+    uvicorn.run(app, host="0.0.0.0", port=8000)
