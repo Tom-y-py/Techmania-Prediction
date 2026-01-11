@@ -4,7 +4,8 @@
     "predictions": "Predictions",
     "analytics": "Analytics",
     "information": "Information",
-    "settings": "Settings"
+    "settings": "Settings",
+    "calendar": "Calendar"
   },
   "dashboard": {
     "title": "Visitor Dashboard",
@@ -100,11 +101,15 @@
   "chart": {
     "title": "Visitor Traffic - Last Month",
     "actualVisitors": "Actual Visitors",
-    "predictedVisitors": "Predicted Visitors",
+    "predictedVisitors": "Future Prediction",
+    "historicalPrediction": "Historical Prediction",
     "confidenceUpper": "Upper Confidence Interval",
     "confidenceLower": "Lower Confidence Interval",
     "error": "Failed to load historical data",
-    "notAvailable": "Historical data is not available"
+    "notAvailable": "Historical data is not available",
+    "predictionAccuracy": "Prediction Accuracy",
+    "accuracyLabel": "Accuracy (±10%)",
+    "avgError": "Average Deviation"
   },
   "analytics": {
     "title": "Data Analytics",
@@ -210,6 +215,30 @@
       "minimum": "Minimum",
       "trend": "Trend",
       "noData": "No data to display"
+    },
+    "predictionHistory": {
+      "title": "Prediction History",
+      "period": "Period",
+      "days": "days",
+      "actual": "Actual",
+      "predicted": "Predicted",
+      "error": "Error",
+      "errorPercent": "Error (%)",
+      "status": "Status",
+      "totalPredictions": "Total Predictions",
+      "avgError": "Average Error",
+      "accuracy10": "Accuracy ±10%",
+      "accuracy20": "Accuracy ±20%",
+      "comparisonChart": "Prediction vs Actual Comparison",
+      "errorChart": "Percentage Deviation",
+      "detailTable": "Detailed Overview",
+      "date": "Date",
+      "noData": "No historical predictions available yet. After creating predictions, you will see comparison with actual data here.",
+      "noHistoryYet": "No data available for comparison yet.",
+      "createPredictions": "After creating predictions and after the predicted days have passed, you will see comparison with actual data here.",
+      "futurePredictions": "Pending Predictions",
+      "futurePredictionsDesc": "You have predictions for future dates. After these days pass, you will see comparison with actual attendance here.",
+      "visitors": "visitors"
     }
   },
   "predictions": {
@@ -247,6 +276,12 @@
   "header": {
     "title": "Techmania Dashboard",
     "notifications": "View notifications",
+    "notificationsTitle": "Notifications",
+    "markAllRead": "Mark all as read",
+    "noNotifications": "No notifications",
+    "viewCalendar": "View calendar",
+    "highAttendance": "High attendance",
+    "niceWeather": "Nice weather",
     "userMenu": "Open user menu",
     "profile": "Profile",
     "logout": "Sign out"
@@ -266,5 +301,45 @@
     "connected": "API Connected",
     "disconnected": "API Unavailable",
     "features": "features"
+  },
+  "alerts": {
+    "title": "Alerts & Insights",
+    "noAlerts": "No new alerts",
+    "active": "active",
+    "highVisitors": "High attendance expected",
+    "upcomingHoliday": "Upcoming holiday",
+    "niceWeather": "Nice weather",
+    "predictionAccurate": "Predictions accurate",
+    "predictionInaccurate": "Lower prediction accuracy",
+    "weekendForecast": "Weekend forecast",
+    "errorLoading": "Error loading",
+    "errorLoadingAlerts": "Failed to load alerts",
+    "last7Days": "Last 7 days",
+    "accuracyWithin10": "of predictions were within ±10%",
+    "expectedTotal": "Expected total",
+    "visitors": "visitors"
+  },
+  "upcomingEvents": {
+    "title": "Upcoming Events",
+    "viewAll": "View all",
+    "noEvents": "No upcoming events",
+    "highTraffic": "High traffic expected",
+    "visitors": "visitors",
+    "today": "Today",
+    "tomorrow": "Tomorrow",
+    "in": "In",
+    "days": "days"
+  },
+  "calendar": {
+    "title": "Events Calendar",
+    "pageTitle": "Events Calendar",
+    "pageSubtitle": "Overview of holidays, vacations and predicted attendance",
+    "today": "Today",
+    "holiday": "Holiday",
+    "vacation": "Vacation",
+    "event": "Event",
+    "noEvents": "No events",
+    "expectedVisitors": "Expected attendance",
+    "visitors": "visitors"
   }
 }

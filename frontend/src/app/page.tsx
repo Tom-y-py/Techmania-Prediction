@@ -6,6 +6,8 @@ import Header from '@/components/Header';
 import StatsCards from '@/components/StatsCards';
 import VisitorChart from '@/components/VisitorChart';
 import RangePredictionForm from '@/components/RangePredictionForm';
+import AlertsPanel from '@/components/AlertsPanel';
+import EventsCalendar from '@/components/EventsCalendar';
 import { useTranslations } from '@/lib/i18n';
 
 export default function Home() {
@@ -88,6 +90,12 @@ export default function Home() {
           {/* Chart */}
           <div id="analytics" className="mb-8">
             <VisitorChart key={`chart-${refreshKey}`} />
+          </div>
+
+          {/* Alerts & Calendar Row */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
+            <AlertsPanel key={`alerts-${refreshKey}`} />
+            <EventsCalendar key={`calendar-${refreshKey}`} />
           </div>
 
           {/* Predictions Section */}

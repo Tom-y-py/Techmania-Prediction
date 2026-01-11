@@ -101,7 +101,7 @@ class WeatherService:
                             'uv_index_max,cloudcover_mean,'
                             'precipitation_probability_max',
                     'timezone': 'Europe/Prague',
-                    'forecast_days': days_ahead + 3  # +3 pro trend
+                    'forecast_days': min(days_ahead + 3, 16)  # +3 pro trend, max 16 dle API limitu
                 }
             
             response = requests.get(url, params=params, timeout=10)
@@ -301,10 +301,7 @@ class WeatherService:
             if not row.empty:
                 return row.iloc[0].to_dict()
         
-        # Pokud nejsou historická data, zkusit API
-        if self.historical_data is None:
-            print(f"⚠️ Historical data not loaded, trying API for {target_date}")
-        
+        # Pro budoucí data je normální, že nejsou v historických datech - použijeme API bez varování
         # API
         return self.get_weather_from_api(target_date)
     

@@ -24,6 +24,7 @@ export default function Sidebar() {
 
   const navigation = [
     { name: t('dashboard'), href: '/', icon: HomeIcon },
+    { name: t('calendar') || 'Kalendář', href: '/calendar', icon: CalendarIcon },
     { name: t('analytics'), href: '/analytics', icon: ChartBarIcon },
     { name: t('information'), href: '/info', icon: InformationCircleIcon },
     { name: t('settings'), href: '/settings', icon: Cog6ToothIcon },
