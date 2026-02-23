@@ -164,17 +164,9 @@ def create_features(df: pd.DataFrame) -> pd.DataFrame:
     if 'wind_speed' in df.columns and 'wind_speed_max' not in df.columns:
         df['wind_speed_max'] = df['wind_speed']
     
-    # PONECHAT sunshine a daylight (důležité features!)
-    
-    if 'sunshine_duration' in df.columns and 'daylight_duration' in df.columns:
-        df['sunshine_ratio'] = np.where(
-            df['daylight_duration'] > 0,
-            df['sunshine_duration'] / df['daylight_duration'],
-            0
-        )
-    
-    if 'temperature_mean' in df.columns and 'wind_speed' in df.columns:
-        df['feels_like_delta'] = df['temperature_mean'] - (df['temperature_mean'] - df['wind_speed'] * 0.5)
+    # REMOVED: sunshine_duration, daylight_duration, sunshine_ratio (není dostupné z API)
+    # REMOVED: feels_like_delta (není dostupné z API)
+    # REMOVED: weather_forecast_confidence (dopočítané, odstraněno)
     
     # Weather improving (BETTER VERSION)
     if 'temperature_mean' in df.columns and 'precipitation' in df.columns:
@@ -190,15 +182,11 @@ def create_features(df: pd.DataFrame) -> pd.DataFrame:
             (df['is_weekend'] == 1)
         ).astype(int)
     
-    # Weather confidence score
-    if all(col in df.columns for col in ['temperature_mean', 'precipitation', 'wind_speed']):
-        temp_stable = (df['temperature_3day_trend'].abs() < 5).astype(int)
-        no_extreme_rain = (df['precipitation'] < 10).astype(int)
-        low_wind = (df['wind_speed'] < 30).astype(int)
-        df['weather_forecast_confidence'] = (temp_stable + no_extreme_rain + low_wind) / 3
+    # REMOVED: weather_forecast_confidence (dopočítané, odstraněno)
     
     # REMOVED: rain (korelace 0.988 s precipitation)
     # REMOVED: apparent_temp_* (korelace 0.99 s temperature_*)
+    # REMOVED: wind_direction, sunshine_*, daylight_duration, cloud_cover_percent
     
     # === GOOGLE TRENDS ===
     print("  ✓ Google Trends")

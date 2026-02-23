@@ -98,9 +98,6 @@ def load_historical_data(csv_path: str = "../data/processed/techmania_with_weath
                     temperature_max=float(row['temperature_max']) if pd.notna(row.get('temperature_max')) else None,
                     temperature_min=float(row['temperature_min']) if pd.notna(row.get('temperature_min')) else None,
                     temperature_mean=float(row['temperature_mean']) if pd.notna(row.get('temperature_mean')) else None,
-                    apparent_temp_max=float(row['apparent_temp_max']) if pd.notna(row.get('apparent_temp_max')) else None,
-                    apparent_temp_min=float(row['apparent_temp_min']) if pd.notna(row.get('apparent_temp_min')) else None,
-                    apparent_temp_mean=float(row['apparent_temp_mean']) if pd.notna(row.get('apparent_temp_mean')) else None,
                     
                     # Weather - Precipitation
                     precipitation=float(row['precipitation']) if pd.notna(row.get('precipitation')) else None,
@@ -113,23 +110,12 @@ def load_historical_data(csv_path: str = "../data/processed/techmania_with_weath
                     # Weather - Wind
                     wind_speed=float(row['wind_speed']) if pd.notna(row.get('wind_speed')) else None,
                     wind_gusts_max=float(row['wind_gusts_max']) if pd.notna(row.get('wind_gusts_max')) else None,
-                    wind_direction=int(row['wind_direction']) if pd.notna(row.get('wind_direction')) else None,
-                    
-                    # Weather - Sun & Cloud
-                    sunshine_duration=float(row['sunshine_duration']) if pd.notna(row.get('sunshine_duration')) else None,
-                    daylight_duration=float(row['daylight_duration']) if pd.notna(row.get('daylight_duration')) else None,
-                    sunshine_ratio=float(row['sunshine_ratio']) if pd.notna(row.get('sunshine_ratio')) else None,
-                    cloud_cover_percent=float(row['cloud_cover_percent']) if pd.notna(row.get('cloud_cover_percent')) else None,
                     
                     # Weather - Computed features
                     is_rainy=int(row['is_rainy']) if pd.notna(row.get('is_rainy')) else None,
                     is_snowy=int(row['is_snowy']) if pd.notna(row.get('is_snowy')) else None,
                     is_windy=int(row['is_windy']) if pd.notna(row.get('is_windy')) else None,
                     is_nice_weather=int(row['is_nice_weather']) if pd.notna(row.get('is_nice_weather')) else None,
-                    feels_like_delta=float(row['feels_like_delta']) if pd.notna(row.get('feels_like_delta')) else None,
-                    weather_forecast_confidence=float(row['weather_forecast_confidence']) if pd.notna(row.get('weather_forecast_confidence')) else None,
-                    temperature_trend_3d=float(row['temperature_trend_3d']) if pd.notna(row.get('temperature_trend_3d')) else None,
-                    is_weather_improving=int(row['is_weather_improving']) if pd.notna(row.get('is_weather_improving')) else None,
                 )
                 db.add(record)
                 records_added += 1
@@ -256,9 +242,6 @@ def load_template_data(csv_path: str = "../data/raw/techmania_2026_template.csv"
                     temperature_max=float(row['temperature_max']) if pd.notna(row.get('temperature_max')) else None,
                     temperature_min=float(row['temperature_min']) if pd.notna(row.get('temperature_min')) else None,
                     temperature_mean=float(row['temperature_mean']) if pd.notna(row.get('temperature_mean')) else None,
-                    apparent_temp_max=float(row['apparent_temp_max']) if pd.notna(row.get('apparent_temp_max')) else None,
-                    apparent_temp_min=float(row['apparent_temp_min']) if pd.notna(row.get('apparent_temp_min')) else None,
-                    apparent_temp_mean=float(row['apparent_temp_mean']) if pd.notna(row.get('apparent_temp_mean')) else None,
                     
                     precipitation=float(row['precipitation']) if pd.notna(row.get('precipitation')) else None,
                     precipitation_probability=float(row['precipitation_probability']) if pd.notna(row.get('precipitation_probability')) else None,
@@ -269,21 +252,11 @@ def load_template_data(csv_path: str = "../data/raw/techmania_2026_template.csv"
                     
                     wind_speed=float(row['wind_speed']) if pd.notna(row.get('wind_speed')) else None,
                     wind_gusts_max=float(row['wind_gusts_max']) if pd.notna(row.get('wind_gusts_max')) else None,
-                    wind_direction=int(row['wind_direction']) if pd.notna(row.get('wind_direction')) else None,
-                    
-                    sunshine_duration=float(row['sunshine_duration']) if pd.notna(row.get('sunshine_duration')) else None,
-                    daylight_duration=float(row['daylight_duration']) if pd.notna(row.get('daylight_duration')) else None,
-                    sunshine_ratio=float(row['sunshine_ratio']) if pd.notna(row.get('sunshine_ratio')) else None,
-                    cloud_cover_percent=float(row['cloud_cover_percent']) if pd.notna(row.get('cloud_cover_percent')) else None,
                     
                     is_rainy=int(row['is_rainy']) if pd.notna(row.get('is_rainy')) else None,
                     is_snowy=int(row['is_snowy']) if pd.notna(row.get('is_snowy')) else None,
                     is_windy=int(row['is_windy']) if pd.notna(row.get('is_windy')) else None,
                     is_nice_weather=int(row['is_nice_weather']) if pd.notna(row.get('is_nice_weather')) else None,
-                    feels_like_delta=float(row['feels_like_delta']) if pd.notna(row.get('feels_like_delta')) else None,
-                    weather_forecast_confidence=float(row['weather_forecast_confidence']) if pd.notna(row.get('weather_forecast_confidence')) else None,
-                    temperature_trend_3d=float(row['temperature_trend_3d']) if pd.notna(row.get('temperature_trend_3d')) else None,
-                    is_weather_improving=int(row['is_weather_improving']) if pd.notna(row.get('is_weather_improving')) else None,
                     
                     # Additional features
                     google_trend=float(row['google_trend']) if pd.notna(row.get('google_trend')) else None,

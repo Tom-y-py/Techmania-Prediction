@@ -45,7 +45,7 @@ def download_weather_data(start_date: str, end_date: str, output_file: str):
                 'weathercode,windspeed_10m_max,windgusts_10m_max,'
                 'winddirection_10m_dominant,sunshine_duration,daylight_duration,'
                 'cloudcover_mean',  # uv_index_max není dostupný v archive API
-        'timezone': 'Europe/Prague'
+        'timezone': 'Europe/Pilsen'
     }
     
     print("🌐 Dotazuji Open-Meteo API...")

@@ -21,7 +21,7 @@ from prediction import (
     combine_historical_and_new,
     get_weather_for_date,
     get_holiday_features,
-    prepare_features_for_prediction,
+    convert_to_numeric,
     add_google_trend_feature,
     predict_with_models,
     ensemble_prediction,
@@ -30,6 +30,14 @@ from prediction import (
     calculate_confidence_interval,
     calculate_confidence_intervals_batch
 )
+
+TREND_FEATURES = [
+    'year', 'month', 'day_of_week', 'week_of_year', 'quarter',
+    'is_weekend', 'is_summer_holiday', 'is_winter_holiday', 'is_school_year',
+    'is_oct_28', 'is_autumn_break', 'is_summer_weekend_event', 'event_score',
+    'day_of_week_sin', 'day_of_week_cos', 'month_sin', 'month_cos',
+    'week_sin', 'week_cos', 'normalized_time'
+]
 
 
 def load_models():
@@ -65,6 +73,63 @@ def load_models():
         print(f"❌ Error: {e}")
         print("   Please train the V3 models first by running: python src/ensemble_model_v3.py")
         return None
+
+
+def _ensure_google_trend_feature(
+    X_source: pd.DataFrame,
+    df_combined: pd.DataFrame,
+    pred_dates: pd.Series,
+    models_dict: Dict
+) -> pd.DataFrame:
+    """Zajistí, že predicted_google_trend je připravená bez hardcoded fallbacku."""
+    X_prepared = X_source.copy()
+    predictor = models_dict.get('google_trend_predictor')
+    trend_features = models_dict.get('trend_features', TREND_FEATURES)
+
+    if predictor is not None:
+        trend_input = pd.DataFrame(index=X_prepared.index)
+        if 'google_trend' in X_prepared.columns:
+            trend_input['google_trend'] = X_prepared['google_trend']
+        trend_output = add_google_trend_feature(
+            trend_input,
+            df_combined,
+            pred_dates,
+            predictor,
+            trend_features
+        )
+        X_prepared['predicted_google_trend'] = trend_output['predicted_google_trend'].values
+        return X_prepared
+
+    if 'google_trend' in X_prepared.columns and X_prepared['google_trend'].notna().all():
+        X_prepared['predicted_google_trend'] = X_prepared['google_trend']
+        return X_prepared
+
+    raise ValueError(
+        "Chybí google_trend_predictor a zároveň není dostupná validní "
+        "historická feature 'google_trend'."
+    )
+
+
+def _build_feature_matrix(
+    df_pred: pd.DataFrame,
+    feature_cols: list
+) -> pd.DataFrame:
+    """Validuje feature kontrakt a vrátí číselnou matici bez NaN."""
+    if df_pred.empty:
+        raise ValueError("DataFrame pro predikci je prázdný.")
+
+    missing_cols = [col for col in feature_cols if col not in df_pred.columns]
+    if missing_cols:
+        raise ValueError(f"Chybí požadované featury pro predikci: {missing_cols}")
+
+    X_pred = df_pred[feature_cols].copy()
+    X_pred = convert_to_numeric(X_pred)
+
+    nan_cols = X_pred.columns[X_pred.isna().any()].tolist()
+    if nan_cols:
+        raise ValueError(f"Feature kontrakt porušen: NaN hodnoty ve sloupcích {nan_cols}")
+
+    return X_pred
 
 
 def predict_single_date(
@@ -120,33 +185,16 @@ def predict_single_date(
     df_combined = combine_historical_and_new(df_historical, new_row)
     df_combined = create_features(df_combined)
     
-    # 6. Připravit features
-    df_pred = df_combined[df_combined['date'] == pred_date_ts]
-    X_pred = prepare_features_for_prediction(
+    # 6. Připravit features s fail-fast validací kontraktu
+    df_pred = df_combined[df_combined['date'] == pred_date_ts].copy()
+    df_pred = _ensure_google_trend_feature(
         df_pred,
-        models_dict['feature_cols'],
         df_combined,
-        pred_date_ts
+        pd.Series([pred_date_ts]),
+        models_dict
     )
-    
-    # 7. Google Trend prediction (pokud je dostupný)
-    if models_dict.get('google_trend_predictor') is not None:
-        trend_features = [
-            'year', 'month', 'day_of_week', 'week_of_year', 'quarter',
-            'is_weekend', 'is_summer_holiday', 'is_winter_holiday', 'is_school_year',
-            'is_oct_28', 'is_autumn_break', 'is_summer_weekend_event', 'event_score',
-            'day_of_week_sin', 'day_of_week_cos', 'month_sin', 'month_cos',
-            'week_sin', 'week_cos', 'normalized_time'
-        ]
-        X_pred = add_google_trend_feature(
-            X_pred,
-            df_combined,
-            pd.Series([pred_date_ts]),
-            models_dict['google_trend_predictor'],
-            trend_features
-        )
-    else:
-        X_pred['predicted_google_trend'] = X_pred.get('google_trend', 50.0)
+    feature_cols = models_dict['feature_cols']
+    X_pred = _build_feature_matrix(df_pred, feature_cols)
     
     # 8. Model predictions
     predictions = predict_with_models(X_pred, models_dict)
@@ -168,16 +216,18 @@ def predict_single_date(
     ensemble_pred = int(round(max(ensemble_pred, 0)))
     
     # 10. Confidence interval
+    historical_mae = models_dict.get('historical_mae')
+    if historical_mae is None:
+        raise ValueError(
+            "Missing 'historical_mae' in models_dict. "
+            "Cannot calculate confidence intervals without historical MAE data."
+        )
+    
     confidence_lower, confidence_upper = calculate_confidence_interval(
         ensemble_pred,
         is_weekend,
         is_holiday,
-        models_dict.get('historical_mae'),
-        {
-            'lightgbm': predictions['lightgbm'][0],
-            'xgboost': predictions['xgboost'][0],
-            'catboost': predictions['catboost'][0]
-        }
+        historical_mae
     )
     
     # 11. Formátovat výsledek
@@ -189,6 +239,7 @@ def predict_single_date(
         'ensemble_prediction': ensemble_pred,
         'ensemble_type': models_dict.get('ensemble_type', 'weighted'),
         'confidence_interval': (confidence_lower, confidence_upper),
+        'is_holiday': bool(is_holiday),
         'catboost_used': use_catboost,
         'individual_predictions': {
             'lightgbm': int(round(predictions['lightgbm'][0])),
@@ -202,6 +253,8 @@ def predict_single_date(
             'precipitation': weather_data['precipitation'],
             'rain': weather_data.get('rain', weather_data['precipitation']),
             'snowfall': weather_data.get('snowfall', 0.0),
+            'wind_speed_max': weather_data.get('wind_speed'),
+            'is_nice_weather': bool(weather_data.get('is_nice_weather', 0)),
         }
     }
     
@@ -271,37 +324,20 @@ def predict_date_range(
     df_combined = combine_historical_and_new(df_historical, df_new)
     df_combined = create_features(df_combined)
     
-    # 4. Připravit features
+    # 4. Připravit features s fail-fast validací kontraktu
     df_pred = df_combined[df_combined['date'].isin(date_range)].copy()
     
     # Odstranit duplikáty - vzít pouze poslední řádek pro každé datum
     df_pred = df_pred.drop_duplicates(subset=['date'], keep='last')
     
-    X_pred = prepare_features_for_prediction(
+    df_pred = _ensure_google_trend_feature(
         df_pred,
-        models_dict['feature_cols'],
         df_combined,
-        pd.to_datetime(start_date)
+        df_pred['date'].reset_index(drop=True),
+        models_dict
     )
-    
-    # 5. Google Trend prediction (pokud je dostupný)
-    if models_dict.get('google_trend_predictor') is not None:
-        trend_features = [
-            'year', 'month', 'day_of_week', 'week_of_year', 'quarter',
-            'is_weekend', 'is_summer_holiday', 'is_winter_holiday', 'is_school_year',
-            'is_oct_28', 'is_autumn_break', 'is_summer_weekend_event', 'event_score',
-            'day_of_week_sin', 'day_of_week_cos', 'month_sin', 'month_cos',
-            'week_sin', 'week_cos', 'normalized_time'
-        ]
-        X_pred = add_google_trend_feature(
-            X_pred,
-            df_combined,
-            df_pred['date'].reset_index(drop=True),
-            models_dict['google_trend_predictor'],
-            trend_features
-        )
-    else:
-        X_pred['predicted_google_trend'] = X_pred.get('google_trend', 50.0)
+    feature_cols = models_dict['feature_cols']
+    X_pred = _build_feature_matrix(df_pred, feature_cols)
     
     # 6. Model predictions
     print(f"🤖 Running predictions...")
@@ -324,14 +360,18 @@ def predict_date_range(
     ensemble_preds = np.round(ensemble_preds).astype(int)
     
     # 8. Confidence intervals
+    historical_mae = models_dict.get('historical_mae')
+    if historical_mae is None:
+        raise ValueError(
+            "Missing 'historical_mae' in models_dict. "
+            "Cannot calculate confidence intervals without historical MAE data."
+        )
+    
     lower_bounds, upper_bounds = calculate_confidence_intervals_batch(
         ensemble_preds,
         is_weekend,
         is_holiday,
-        predictions['lightgbm'],
-        predictions['xgboost'],
-        predictions['catboost'],
-        models_dict.get('historical_mae')
+        historical_mae
     )
     
     # 9. Sestavit výsledky

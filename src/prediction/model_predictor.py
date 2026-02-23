@@ -39,11 +39,21 @@ def predict_with_models(
     Returns:
         Dict s predikcemi: {'lightgbm': array, 'xgboost': array, 'catboost': array}
     """
+    if X.empty:
+        raise ValueError("Feature matrix pro predikci je prázdná.")
+    if X.isna().any().any():
+        nan_cols = X.columns[X.isna().any()].tolist()
+        raise ValueError(f"Feature matrix obsahuje NaN hodnoty ve sloupcích: {nan_cols}")
+    required_models = ("lgb", "xgb", "cat")
+    missing_models = [model_key for model_key in required_models if model_key not in models_dict]
+    if missing_models:
+        raise KeyError(f"Chybí modely v models_dict: {missing_models}")
+
     # LightGBM
     lgb_model = models_dict['lgb']
-    try:
+    if hasattr(lgb_model, 'best_iteration'):
         lgb_preds = lgb_model.predict(X, num_iteration=lgb_model.best_iteration)
-    except:
+    else:
         lgb_preds = lgb_model.predict(X)
     
     # XGBoost
@@ -131,17 +141,16 @@ def ensemble_prediction(
         # Všední dny: jen LightGBM + XGBoost
         if np.any(~use_cat):
             w_sum = w_lgb + w_xgb
-            if w_sum > 0:
-                ensemble_preds[~use_cat] = (
-                    (w_lgb / w_sum) * lgb_preds[~use_cat] +
-                    (w_xgb / w_sum) * xgb_preds[~use_cat]
+            if w_sum <= 0:
+                raise ValueError(
+                    f"Invalid weights sum for weekday prediction: w_lgb={w_lgb}, w_xgb={w_xgb}. "
+                    "Sum must be > 0."
                 )
-            else:
-                # Fallback
-                ensemble_preds[~use_cat] = (
-                    0.5 * lgb_preds[~use_cat] +
-                    0.5 * xgb_preds[~use_cat]
-                )
+            
+            ensemble_preds[~use_cat] = (
+                (w_lgb / w_sum) * lgb_preds[~use_cat] +
+                (w_xgb / w_sum) * xgb_preds[~use_cat]
+            )
         
         return ensemble_preds
 
@@ -178,15 +187,14 @@ def get_effective_weights(
     else:
         # CatBoost nepoužit - přenormalizovat
         w_sum = w_lgb + w_xgb
-        if w_sum > 0:
-            return {
-                'lightgbm': float(w_lgb / w_sum),
-                'xgboost': float(w_xgb / w_sum),
-                'catboost': 0.0
-            }
-        else:
-            return {
-                'lightgbm': 0.5,
-                'xgboost': 0.5,
-                'catboost': 0.0
-            }
+        if w_sum <= 0:
+            raise ValueError(
+                f"Invalid weights sum: w_lgb={w_lgb}, w_xgb={w_xgb}. "
+                "Sum must be > 0 when CatBoost is not used."
+            )
+        
+        return {
+            'lightgbm': float(w_lgb / w_sum),
+            'xgboost': float(w_xgb / w_sum),
+            'catboost': 0.0
+        }
