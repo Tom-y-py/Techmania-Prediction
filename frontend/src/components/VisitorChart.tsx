@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import {
   Chart as ChartJS,
   CategoryScale,
@@ -40,14 +40,25 @@ export default function VisitorChart() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [timeRange, setTimeRange] = useState<'week' | 'month' | 'quarter' | 'year'>('month');
+  
+  // Použijeme ref pro tracking loading stavu aby se fetchData nemusel přegenerovat
+  const isLoadingRef = useRef(false);
 
   // Funkce pro načtení dat - použijeme useCallback aby byla stabilní pro hook
   const fetchData = useCallback(async () => {
+    // Zabránit duplicitním voláním pokud už probíhá načítání
+    if (isLoadingRef.current) {
+      console.log('Already loading, skipping...');
+      return;
+    }
+    
+    isLoadingRef.current = true;
     setLoading(true);
     setError(null);
+    
     try {
       // Určíme kolik dní zpátky pro historii a predikci
-      const historyDaysMap = {
+      const historyDaysMap: Record<string, number> = {
         week: 7,
         month: 30,
         quarter: 90,
@@ -56,43 +67,43 @@ export default function VisitorChart() {
       
       const daysBack = historyDaysMap[timeRange];
       
-      // Načteme historická reálná data
-      const historical = await api.getHistoricalData(daysBack);
-      setHistoricalData(historical);
+      // Načteme všechna data PARALELNĚ pomocí Promise.allSettled
+      // aby jeden selhání nezpůsobil pád celé komponenty
+      const [historical, today, history, savedPredictions] = await Promise.allSettled([
+        api.getHistoricalData(daysBack),
+        api.getTodayVisitors(),
+        api.getPredictionHistory(daysBack, true),
+        api.getLatestPredictions(15)
+      ]);
       
-      // Pokusíme se načíst dnešní data (může selhat, není kritické)
-      try {
-        const today = await api.getTodayVisitors();
-        setTodayData(today);
-      } catch (todayErr) {
-        console.log('Today data not available:', todayErr);
+      // Zpracování historických dat (povinné)
+      if (historical.status === 'fulfilled') {
+        setHistoricalData(historical.value);
+      } else {
+        console.error('Failed to load historical data:', historical.reason);
+        throw new Error(historical.reason?.message || 'Failed to load historical data');
+      }
+      
+      // Zpracování dnešních dat (nepovinné)
+      if (today.status === 'fulfilled') {
+        setTodayData(today.value);
+      } else {
         setTodayData(null);
       }
       
-      // Načteme historii predikcí - VŠECHNY predikce pro daný rozsah včetně historických
-      // Backend automaticky počítá metriky a páruje s reálnými daty
-      try {
-        const history = await api.getPredictionHistory(daysBack, true);
-        console.log('Prediction history loaded:', history);
-        console.log('Total predictions:', history.history?.length || 0);
-        console.log('Past predictions with actual data:', 
-          history.history?.filter((p: any) => !p.is_future && p.actual_visitors !== undefined).length || 0
-        );
-        setPredictionHistory(history);
-      } catch (historyErr) {
-        console.log('Prediction history not available:', historyErr);
+      // Zpracování historie predikcí (nepovinné)
+      if (history.status === 'fulfilled') {
+        setPredictionHistory(history.value);
+      } else {
         setPredictionHistory(null);
       }
       
-      // Načteme budoucí predikce (pouze od dneška dopředu)
-      try {
-        const savedPredictions = await api.getLatestPredictions(15);
-        
-        // Filtrovat pouze budoucí predikce (od dneška)
+      // Zpracování budoucích predikcí (nepovinné)
+      if (savedPredictions.status === 'fulfilled') {
         const now = new Date();
         now.setHours(0, 0, 0, 0);
         
-        const futurePredictions = savedPredictions.predictions
+        const futurePredictions = savedPredictions.value.predictions
           .filter((pred: any) => {
             const predDate = new Date(pred.date);
             predDate.setHours(0, 0, 0, 0);
@@ -126,8 +137,7 @@ export default function VisitorChart() {
         } else {
           setFutureData(null);
         }
-      } catch (futureErr) {
-        console.log('Future predictions not available:', futureErr);
+      } else {
         setFutureData(null);
       }
       
@@ -136,16 +146,27 @@ export default function VisitorChart() {
       setError(err.message || t('error'));
     } finally {
       setLoading(false);
+      isLoadingRef.current = false;
     }
-  }, [timeRange, t]);
+  }, [timeRange, t]); // Pouze timeRange a t - žádný loading state!
 
-  // Initial load a reload při změně rozsahu
+  // Initial load a reload při změně rozsahu - VYPNUTO
+  // Způsobovalo nekonečné smyčky a burst API požadavků
+  /*
   useEffect(() => {
     fetchData();
-  }, [fetchData]);
+  }, [fetchData]); // fetchData je nyní stabilní díky správným dependencies
+  */
+
+  // Manuální načtení při mount
+  useEffect(() => {
+    fetchData();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [timeRange]); // Pouze při změně timeRange
 
   // Hook pro automatický update při nových predikcích
-  usePredictionUpdates(fetchData, 30000); // Check každých 30 sekund
+  // VYPNUTO - způsobuje příliš mnoho požadavků
+  // usePredictionUpdates(fetchData, 60000);
 
   const options = {
     responsive: true,
@@ -282,6 +303,11 @@ export default function VisitorChart() {
   // Seřadíme datumy a vytvoříme pole pro graf
   const sortedDates = Array.from(dateMap.keys()).sort();
   
+  // Dnešní datum pro rozdělení minulost/budoucnost
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const todayStr = today.toISOString().split('T')[0];
+  
   const labels = sortedDates.map(date => {
     const d = new Date(date);
     return `${d.getDate()}.${d.getMonth() + 1}`;
@@ -291,29 +317,37 @@ export default function VisitorChart() {
     dateMap.get(date)?.historical ?? null
   );
 
-  const predictedVisitors = sortedDates.map(date => 
-    dateMap.get(date)?.predicted ?? null
-  );
+  // Budoucí predikce - POUZE pro datumy >= dnes
+  const predictedVisitors = sortedDates.map(date => {
+    if (date < todayStr) return null; // Minulé datumy = null
+    return dateMap.get(date)?.predicted ?? null;
+  });
 
-  const historicalPredictions = sortedDates.map(date => 
-    dateMap.get(date)?.historicalPrediction ?? null
-  );
+  // Historické predikce - POUZE pro datumy < dnes (kde máme i skutečná data)
+  const historicalPredictions = sortedDates.map(date => {
+    if (date >= todayStr) return null; // Budoucí datumy = null
+    return dateMap.get(date)?.historicalPrediction ?? null;
+  });
 
-  const historicalPredLower = sortedDates.map(date => 
-    dateMap.get(date)?.historicalPredLower ?? null
-  );
+  const historicalPredLower = sortedDates.map(date => {
+    if (date >= todayStr) return null; // Budoucí datumy = null
+    return dateMap.get(date)?.historicalPredLower ?? null;
+  });
 
-  const historicalPredUpper = sortedDates.map(date => 
-    dateMap.get(date)?.historicalPredUpper ?? null
-  );
+  const historicalPredUpper = sortedDates.map(date => {
+    if (date >= todayStr) return null; // Budoucí datumy = null
+    return dateMap.get(date)?.historicalPredUpper ?? null;
+  });
 
-  const confidenceLower = sortedDates.map(date => 
-    dateMap.get(date)?.lower ?? null
-  );
+  const confidenceLower = sortedDates.map(date => {
+    if (date < todayStr) return null; // Minulé datumy = null
+    return dateMap.get(date)?.lower ?? null;
+  });
 
-  const confidenceUpper = sortedDates.map(date => 
-    dateMap.get(date)?.upper ?? null
-  );
+  const confidenceUpper = sortedDates.map(date => {
+    if (date < todayStr) return null; // Minulé datumy = null
+    return dateMap.get(date)?.upper ?? null;
+  });
 
   // Přidáme dnešní real-time hodnotu pouze pokud jsou to skutečná data (ne predikce)
   // todayData obsahuje is_historical informaci z API, ale ta se ztratí při transformaci

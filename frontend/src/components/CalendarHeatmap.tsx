@@ -20,21 +20,25 @@ export default function CalendarHeatmap({ defaultYear = 2025 }: CalendarHeatmapP
   useEffect(() => {
     const fetchData = async () => {
       try {
-        // Načíst data bez specifikace roku, abychom dostali všechny roky
-        const response = await fetch('http://localhost:8000/analytics/heatmap');
-        const result = await response.json();
+        setLoading(true);
+        // Použít API wrapper místo přímého fetch
+        const response = await api.getCalendarHeatmapData();
         
-        setData(result.data || []);
-        const years = result.available_years || [];
+        setData(response);
+        
+        // Získat dostupné roky z dat
+        const yearSet = new Set<number>();
+        response.forEach(d => yearSet.add(new Date(d.date).getFullYear()));
+        const years = Array.from(yearSet).sort((a, b) => a - b);
         setAvailableYears(years);
         
         // Nastavit poslední dostupný rok jako výchozí
-        if (years.length > 0 && !defaultYear) {
+        if (years.length > 0) {
           setSelectedYear(years[years.length - 1]);
         }
       } catch (err: any) {
         console.error('Failed to fetch heatmap data:', err);
-        setError(err.message);
+        setError(err.message || 'Nepodařilo se načíst data kalendáře');
       } finally {
         setLoading(false);
       }

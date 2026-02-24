@@ -19,6 +19,17 @@ import type {
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000';
 
+// Error handling helper
+export function handleApiError(error: any): string {
+  if (error?.response?.data?.detail) {
+    return error.response.data.detail;
+  }
+  if (error?.message) {
+    return error.message;
+  }
+  return 'Neznámá chyba při komunikaci s API';
+}
+
 export const api = {
   async predict(data: PredictionRequest): Promise<PredictionResponse> {
     const response = await fetch(`${API_BASE_URL}/predict`, {
@@ -283,6 +294,18 @@ export const api = {
     return response.json();
   },
 
+  async getLatestPredictions(days?: number): Promise<any> {
+    const params = new URLSearchParams();
+    if (days !== undefined) params.append('days', days.toString());
+    
+    const url = `${API_BASE_URL}/predictions/latest${params.toString() ? '?' + params.toString() : ''}`;
+    const response = await fetch(url);
+    if (!response.ok) {
+      throw new Error('Chyba při získávání nejnovějších predikcí');
+    }
+    return response.json();
+  },
+
   async getCalendarEvents(month?: number, year?: number): Promise<CalendarEventsResponse> {
     const params = new URLSearchParams();
     if (month !== undefined) params.append('month', month.toString());
@@ -358,5 +381,156 @@ export const api = {
 
     const data = await response.json();
     return data.response;
+  },
+
+  // Events Management API
+  async runEventScraper(data: { start_date: string; end_date: string; sources?: string[] }): Promise<any> {
+    const response = await fetch(`${API_BASE_URL}/events/scraper/run`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(data),
+    });
+
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.detail || 'Chyba při spouštění scraperu');
+    }
+
+    return response.json();
+  },
+
+  async getEvents(params?: {
+    start_date?: string;
+    end_date?: string;
+    is_active?: boolean;
+    category?: string;
+    min_impact?: number;
+    limit?: number;
+  }): Promise<any> {
+    const searchParams = new URLSearchParams();
+    if (params?.start_date) searchParams.append('start_date', params.start_date);
+    if (params?.end_date) searchParams.append('end_date', params.end_date);
+    if (params?.is_active !== undefined) searchParams.append('is_active', params.is_active.toString());
+    if (params?.category) searchParams.append('category', params.category);
+    if (params?.min_impact !== undefined) searchParams.append('min_impact', params.min_impact.toString());
+    if (params?.limit !== undefined) searchParams.append('limit', params.limit.toString());
+    
+    const url = `${API_BASE_URL}/events${searchParams.toString() ? '?' + searchParams.toString() : ''}`;
+    const response = await fetch(url);
+    
+    if (!response.ok) {
+      throw new Error('Chyba při získávání událostí');
+    }
+    
+    return response.json();
+  },
+
+  async getEvent(id: number): Promise<any> {
+    const response = await fetch(`${API_BASE_URL}/events/${id}`);
+    
+    if (!response.ok) {
+      throw new Error('Chyba při získávání události');
+    }
+    
+    return response.json();
+  },
+
+  async createEvent(data: any): Promise<any> {
+    const response = await fetch(`${API_BASE_URL}/events`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(data),
+    });
+
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.detail || 'Chyba při vytváření události');
+    }
+
+    return response.json();
+  },
+
+  async updateEvent(id: number, data: any): Promise<any> {
+    const response = await fetch(`${API_BASE_URL}/events/${id}`, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(data),
+    });
+
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.detail || 'Chyba při aktualizaci události');
+    }
+
+    return response.json();
+  },
+
+  async deleteEvent(id: number): Promise<void> {
+    const response = await fetch(`${API_BASE_URL}/events/${id}`, {
+      method: 'DELETE',
+    });
+
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.detail || 'Chyba při mazání události');
+    }
+  },
+
+  async getEventsForDate(date: string): Promise<any> {
+    const response = await fetch(`${API_BASE_URL}/events/date/${date}`);
+    
+    if (!response.ok) {
+      throw new Error('Chyba při získávání událostí pro datum');
+    }
+    
+    return response.json();
+  },
+
+  // Analytics methods
+  async getCorrelationAnalysis(): Promise<any> {
+    const response = await fetch(`${API_BASE_URL}/analytics/correlation`);
+    if (!response.ok) {
+      throw new Error('Chyba při získávání korelační analýzy');
+    }
+    return response.json();
+  },
+
+  async getSeasonalityAnalysis(): Promise<any> {
+    const response = await fetch(`${API_BASE_URL}/analytics/seasonality`);
+    if (!response.ok) {
+      throw new Error('Chyba při získávání sezónní analýzy');
+    }
+    return response.json();
+  },
+
+  async getHeatmapData(year?: number): Promise<any> {
+    const params = new URLSearchParams();
+    if (year !== undefined) params.append('year', year.toString());
+    
+    const url = `${API_BASE_URL}/analytics/heatmap${params.toString() ? '?' + params.toString() : ''}`;
+    const response = await fetch(url);
+    if (!response.ok) {
+      throw new Error('Chyba při získávání heatmap dat');
+    }
+    return response.json();
+  },
+
+  async getAnalyticsPredictionHistory(days: number = 30, includeFuture: boolean = true): Promise<any> {
+    const params = new URLSearchParams();
+    params.append('days', days.toString());
+    params.append('include_future', includeFuture.toString());
+    
+    const url = `${API_BASE_URL}/analytics/prediction-history?${params.toString()}`;
+    const response = await fetch(url);
+    if (!response.ok) {
+      throw new Error('Chyba při získávání historie predikcí');
+    }
+    return response.json();
   }
 };

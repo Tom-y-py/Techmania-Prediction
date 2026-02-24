@@ -125,11 +125,127 @@ def _build_feature_matrix(
     X_pred = df_pred[feature_cols].copy()
     X_pred = convert_to_numeric(X_pred)
 
+    # Robust fallback pro produkci:
+    # některé trend/school featury mohou být pro predikované datum chybějící.
+    # V takovém případě použijeme konzistentní náhradní hodnoty místo pádu API.
+    if 'predicted_google_trend' in X_pred.columns:
+        trend_base = X_pred['predicted_google_trend']
+        for col in ['google_trend', 'google_trend_lag1', 'google_trend_lag7', 'google_trend_rolling']:
+            if col in X_pred.columns:
+                X_pred[col] = X_pred[col].fillna(trend_base)
+        if 'google_trend_trend' in X_pred.columns:
+            X_pred['google_trend_trend'] = X_pred['google_trend_trend'].fillna(0.0)
+
+    for col in ['Mateřská_škola', 'Střední_škola', 'Základní_škola']:
+        if col in X_pred.columns:
+            X_pred[col] = X_pred[col].fillna(0.0)
+
     nan_cols = X_pred.columns[X_pred.isna().any()].tolist()
     if nan_cols:
         raise ValueError(f"Feature kontrakt porušen: NaN hodnoty ve sloupcích {nan_cols}")
 
     return X_pred
+
+
+def _safe_float(value) -> float:
+    """Bezpečně převede hodnotu na float pro debug výpis."""
+    if pd.isna(value):
+        return 0.0
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _normalize_importances(
+    raw_importances: np.ndarray,
+    feature_cols: list
+) -> Dict[str, float]:
+    """Převede raw importance na procenta pro všechny featury."""
+    importances = np.abs(np.asarray(raw_importances, dtype=float))
+
+    if importances.size != len(feature_cols):
+        return {feature: 0.0 for feature in feature_cols}
+
+    total = float(importances.sum())
+    if total <= 0:
+        return {feature: 0.0 for feature in feature_cols}
+
+    return {
+        feature: float((importance / total) * 100.0)
+        for feature, importance in zip(feature_cols, importances)
+    }
+
+
+def _extract_model_feature_importance_percent(
+    model,
+    feature_cols: list
+) -> Dict[str, float]:
+    """
+    Vrátí procentuální důležitost všech features pro daný model.
+    Podporuje LightGBM, XGBoost a CatBoost.
+    """
+    if model is None:
+        return {feature: 0.0 for feature in feature_cols}
+
+    raw_importances = None
+
+    if hasattr(model, "feature_importances_"):
+        raw_importances = np.asarray(model.feature_importances_, dtype=float)
+    elif hasattr(model, "feature_importance"):
+        raw_importances = np.asarray(model.feature_importance(), dtype=float)
+    elif hasattr(model, "get_feature_importance"):
+        raw_importances = np.asarray(model.get_feature_importance(), dtype=float)
+    elif hasattr(model, "get_score"):
+        score_dict = model.get_score(importance_type="gain")
+        score_by_feature = {}
+        for idx, feature in enumerate(feature_cols):
+            fallback_key = f"f{idx}"
+            score_by_feature[feature] = float(
+                score_dict.get(feature, score_dict.get(fallback_key, 0.0))
+            )
+        raw_importances = np.asarray([score_by_feature[f] for f in feature_cols], dtype=float)
+
+    if raw_importances is None:
+        return {feature: 0.0 for feature in feature_cols}
+
+    return _normalize_importances(raw_importances, feature_cols)
+
+
+def _log_feature_debug_info(
+    X_pred: pd.DataFrame,
+    feature_cols: list,
+    models_dict: Dict,
+    use_catboost: bool,
+    context_label: str = "single_date",
+    row_index: int = 0
+) -> None:
+    """Debug log: hodnoty features + procentuální důležitost pro použité modely."""
+    print(f"[DEBUG] context={context_label}; row_index={row_index}; Feature values used for prediction:")
+    feature_row = X_pred.iloc[row_index]
+    for feature in feature_cols:
+        value = _safe_float(feature_row.get(feature, 0.0))
+        print(f"[DEBUG] context={context_label}; row_index={row_index}; feature={feature}; value={value:.6f}")
+
+    model_keys = {
+        "lightgbm": "lgb",
+        "xgboost": "xgb",
+    }
+    if use_catboost:
+        model_keys["catboost"] = "cat"
+
+    for model_name, model_key in model_keys.items():
+        importance_percent = _extract_model_feature_importance_percent(
+            models_dict.get(model_key),
+            feature_cols
+        )
+        print(f"[DEBUG] context={context_label}; row_index={row_index}; Feature importance percentages for model={model_name}:")
+        for feature in feature_cols:
+            percent = importance_percent.get(feature, 0.0)
+            print(
+                f"[DEBUG] context={context_label}; row_index={row_index}; "
+                f"model={model_name}; feature={feature}; percent={percent:.2f}"
+            )
 
 
 def predict_single_date(
@@ -203,6 +319,13 @@ def predict_single_date(
     is_weekend = X_pred['is_weekend'].values[0] == 1
     is_holiday = X_pred['is_holiday'].values[0] == 1
     use_catboost = should_use_catboost(is_weekend, is_holiday)
+
+    _log_feature_debug_info(
+        X_pred=X_pred,
+        feature_cols=feature_cols,
+        models_dict=models_dict,
+        use_catboost=use_catboost
+    )
     
     ensemble_pred = ensemble_prediction(
         predictions,
@@ -355,6 +478,21 @@ def predict_date_range(
         models_dict.get('ensemble_type', 'weighted'),
         models_dict.get('meta_model')
     )
+
+    for idx, pred_ts in enumerate(df_pred['date'].values):
+        pred_day = pd.to_datetime(pred_ts).date()
+        use_catboost_for_row = should_use_catboost(
+            bool(is_weekend[idx]),
+            bool(is_holiday[idx])
+        )
+        _log_feature_debug_info(
+            X_pred=X_pred,
+            feature_cols=feature_cols,
+            models_dict=models_dict,
+            use_catboost=use_catboost_for_row,
+            context_label=f"range:{pred_day.isoformat()}",
+            row_index=idx
+        )
     
     ensemble_preds = np.maximum(ensemble_preds, 0)
     ensemble_preds = np.round(ensemble_preds).astype(int)

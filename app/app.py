@@ -54,7 +54,7 @@ config.print_info()
 try:
     from database import (
         get_db, init_db, SessionLocal, Prediction, HistoricalData, TemplateData, Event,
-        get_next_version, validate_future_date, mark_template_complete,
+        get_next_version, mark_template_complete,
         get_complete_template_records, get_latest_prediction,
         get_events_for_date as db_get_events_for_date, get_events_for_range, update_template_event_flag
     )
@@ -995,7 +995,9 @@ async def predict(
     Automaticky detekuje svátky a získává informace o počasí.
     Uloží predikci do databáze s verzováním.
     
-    DŮLEŽITÉ: Nepřijímá predikce do minulosti (pouze budoucí data).
+    DŮLEŽITÉ:
+    - Predikce do minulosti je povolena pouze pro data starší než 5 dní
+      (kvůli dostupnosti historických dat počasí v Open-Meteo Archive API).
     MAX 16 DNÍ DOPŘEDU (limit Weather API).
     """
     if not models:
@@ -1008,13 +1010,19 @@ async def predict(
         pred_date = pd.to_datetime(request.date).date()
         today = date.today()
         
-        # Validace: zakázat predikce do minulosti
-        if DATABASE_ENABLED and not validate_future_date(pred_date):
-            raise HTTPException(
-                status_code=400,
-                detail=f"Nelze vytvořit predikci do minulosti. Požadované datum: {pred_date}, Dnešní datum: {today}."
-            )
-        
+        # Validace: historická predikce je povolena pouze pro data starší než 5 dní
+        if pred_date < today:
+            days_in_past = (today - pred_date).days
+            if days_in_past <= 5:
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        "Nelze vytvořit predikci pro posledních 5 dní zpětně, "
+                        "protože historická data počasí ještě nejsou dostupná. "
+                        "Zvolte datum starší než 5 dní."
+                    ),
+                )
+
         # Validace: max 16 dní dopředu
         days_ahead = (pred_date - today).days
         if days_ahead > 16:
@@ -1120,11 +1128,9 @@ async def predict_range(
 
     Použije refaktorovaný predict_date_range.
     
-    Parametry:
-    - backtest: Pokud True, povolí predikce pro historická data (pro testování přesnosti modelu)
-    
     DŮLEŽITÉ: 
-    - Bez backtest=True nepřijímá predikce do minulosti
+    - Predikce do minulosti je povolena pouze pro data starší než 5 dní
+      (kvůli dostupnosti historických dat počasí v Open-Meteo Archive API).
     - MAX 16 DNÍ DOPŘEDU pro budoucí data (limit Weather API forecast)
     """
     if not models:
@@ -1140,7 +1146,26 @@ async def predict_range(
         if start_date > end_date:
             raise HTTPException(status_code=400, detail="start_date musí být před end_date")
         
-        # Validace pro backtest vs normální predikce
+        # Validace: interval nesmí zasáhnout posledních 5 dní zpětně,
+        # protože pro ně nejsou v Archive API dostupná historická data počasí.
+        recent_past_boundary = today - timedelta(days=5)
+        if start_date.date() < today and end_date.date() >= recent_past_boundary:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "Nelze vytvořit predikci pro období zasahující do posledních 5 dní zpětně, "
+                    "protože historická data počasí ještě nejsou dostupná. "
+                    f"Zvolte období končící nejpozději {recent_past_boundary - timedelta(days=1)}."
+                ),
+            )
+
+        max_date = today + timedelta(days=16)
+        if end_date.date() > max_date:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Nelze vytvořit predikci více než 16 dní dopředu. Maximální datum: {max_date}"
+            )
+
         if backtest:
             if end_date.date() > today:
                 raise HTTPException(
@@ -1148,19 +1173,6 @@ async def predict_range(
                     detail=f"Backtest je pouze pro historická data. End datum: {end_date.date()} je v budoucnosti."
                 )
             print(f"🔬 BACKTEST MODE: {start_date.date()} - {end_date.date()}")
-        else:
-            if DATABASE_ENABLED and start_date.date() < today:
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"Nelze vytvořit predikci do minulosti. Použijte parametr backtest=true"
-                )
-            
-            max_date = today + timedelta(days=16)
-            if end_date.date() > max_date:
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"Nelze vytvořit predikci více než 16 dní dopředu. Maximální datum: {max_date}"
-                )
         
         # Připravit models_dict
         models_dict = {

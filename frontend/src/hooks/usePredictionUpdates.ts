@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useCallback } from 'react';
 
 /**
  * Hook pro automatickou detekci změn v predikcích a trigger refresh callbacku.
@@ -9,6 +9,12 @@ import { useEffect, useRef } from 'react';
 export function usePredictionUpdates(onUpdate: () => void, intervalMs: number = 30000) {
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const lastCheckRef = useRef<Date>(new Date());
+  const onUpdateRef = useRef(onUpdate);
+
+  // Aktualizovat ref při změně callbacku, ale ne spouštět useEffect
+  useEffect(() => {
+    onUpdateRef.current = onUpdate;
+  }, [onUpdate]);
 
   useEffect(() => {
     // Polling funkce - kontroluje změny v predikcích
@@ -29,7 +35,7 @@ export function usePredictionUpdates(onUpdate: () => void, intervalMs: number = 
           // Pokud je predikce novější než poslední kontrola, zavoláme callback
           if (createdAt > lastCheckRef.current) {
             lastCheckRef.current = new Date();
-            onUpdate();
+            onUpdateRef.current(); // Použít ref místo přímého volání
           }
         }
       } catch (error) {
@@ -46,5 +52,5 @@ export function usePredictionUpdates(onUpdate: () => void, intervalMs: number = 
         clearInterval(intervalRef.current);
       }
     };
-  }, [onUpdate, intervalMs]);
+  }, [intervalMs]); // Pouze intervalMs v dependencies, ne onUpdate!
 }
