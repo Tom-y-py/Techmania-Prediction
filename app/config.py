@@ -17,7 +17,7 @@ load_dotenv()
 class AIConfig:
     """Konfigurace pro AI model."""
     provider: str = "groq"
-    model: str = "llama-3.1-8b-instant"
+    model: str = "meta-llama/llama-4-scout-17b-16e-instruct"
     api_key: Optional[str] = field(default_factory=lambda: os.getenv("GROQ_API_KEY"))
     temperature: float = 0.3
     max_tokens: int = 2048

@@ -12,7 +12,9 @@ import { useTranslations } from '@/lib/i18n';
 
 export default function Home() {
   const t = useTranslations('dashboard');
-  const [refreshKey, setRefreshKey] = useState(0);
+  // ODSTRANĚNO: refreshKey způsoboval remountování všech komponent každých 30s
+  // což vedlo k burst desítek API požadavků najednou -> 503 rate limit errors
+  // Každá komponenta má vlastní useEffect a auto-refresh hook
   const [settings, setSettings] = useState({
     autoRefresh: true,
     refreshInterval: '30'
@@ -53,17 +55,9 @@ export default function Home() {
     return () => window.removeEventListener('storage', handleStorageChange);
   }, []);
 
-  // Automatická aktualizace dat
-  useEffect(() => {
-    if (!settings.autoRefresh) return;
-
-    const interval = setInterval(() => {
-      setRefreshKey(prev => prev + 1);
-      console.log('Automatická aktualizace dat...');
-    }, parseInt(settings.refreshInterval) * 1000);
-
-    return () => clearInterval(interval);
-  }, [settings.autoRefresh, settings.refreshInterval]);
+  // Automatická aktualizace dat - VYPNUTO
+  // Každá komponenta má vlastní useEffect a refresh logiku (např. usePredictionUpdates hook)
+  // Globální refresh způsoboval remountování všech komponent a burst API calls
 
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
@@ -84,18 +78,18 @@ export default function Home() {
 
           {/* Stats Cards */}
           <div className="mb-8">
-            <StatsCards key={`stats-${refreshKey}`} />
+            <StatsCards />
           </div>
 
           {/* Chart */}
           <div id="analytics" className="mb-8">
-            <VisitorChart key={`chart-${refreshKey}`} />
+            <VisitorChart />
           </div>
 
           {/* Alerts & Calendar Row */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
-            <AlertsPanel key={`alerts-${refreshKey}`} />
-            <EventsCalendar key={`calendar-${refreshKey}`} />
+            <AlertsPanel />
+            <EventsCalendar />
           </div>
 
           {/* Predictions Section */}

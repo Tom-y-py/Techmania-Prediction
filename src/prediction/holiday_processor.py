@@ -86,14 +86,7 @@ def get_holiday_from_api(pred_date: date_type) -> Dict:
         Dict s holiday features
     """
     if not HOLIDAY_SERVICE_AVAILABLE:
-        # Minimální fallback bez API
-        return {
-            'day_of_week': pred_date.strftime('%A'),
-            'is_weekend': int(pred_date.weekday() >= 5),
-            'is_holiday': 0,
-            'nazvy_svatek': None,
-            'is_event': 0,
-        }
+        raise RuntimeError("Holiday service not available")
     
     try:
         holiday_info = holiday_service.get_holiday_info(pred_date)
@@ -127,16 +120,7 @@ def get_holiday_from_api(pred_date: date_type) -> Dict:
         return holiday_data
         
     except Exception as e:
-        print(f"   ⚠️ Holiday API warning: {e}")
-        # Minimální fallback
-        return {
-            'day_of_week': pred_date.strftime('%A'),
-            'is_weekend': int(pred_date.weekday() >= 5),
-            'is_holiday': 0,
-            'nazvy_svatek': None,
-            'is_event': 0,
-        }
-
+        raise RuntimeError(f"Error fetching holiday data from API: {e}")
 
 def get_holiday_features(
     pred_date: date_type,
@@ -147,7 +131,6 @@ def get_holiday_features(
     
     Priorita:
     1. Template (pokud je dostupný) - nejpřesnější
-    2. Holiday API - fallback
     
     Args:
         pred_date: Datum predikce

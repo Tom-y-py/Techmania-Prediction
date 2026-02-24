@@ -258,25 +258,33 @@ export default function SettingsPage() {
                   </button>
                 </div>
 
-                {/* Refresh interval */}
-                {autoRefresh && (
-                  <div>
-                    <label htmlFor="refresh-interval" className="block text-sm font-medium text-gray-900 dark:text-white">
-                      {t('refreshInterval')}
-                    </label>
-                    <select
-                      id="refresh-interval"
-                      value={refreshInterval}
-                      onChange={(e) => setRefreshInterval(e.target.value)}
-                      className="mt-2 block w-full rounded-md border-0 py-1.5 pl-3 pr-10 text-gray-900 dark:text-white dark:bg-gray-700 ring-1 ring-inset ring-gray-300 dark:ring-gray-600 focus:ring-2 focus:ring-techmania-blue sm:text-sm sm:leading-6"
-                    >
-                      <option value="10">{t('10seconds')}</option>
-                      <option value="30">{t('30seconds')}</option>
-                      <option value="60">{t('1minute')}</option>
-                      <option value="300">{t('5minutes')}</option>
-                    </select>
-                  </div>
-                )}
+                {/* Refresh interval - vždy viditelný, ale disabled když je autoRefresh vypnutý */}
+                <div>
+                  <label htmlFor="refresh-interval" className="block text-sm font-medium text-gray-900 dark:text-white">
+                    {t('refreshInterval')}
+                  </label>
+                  <select
+                    id="refresh-interval"
+                    value={refreshInterval}
+                    onChange={(e) => setRefreshInterval(e.target.value)}
+                    disabled={!autoRefresh}
+                    className={`mt-2 block w-full rounded-md border-0 py-1.5 pl-3 pr-10 ring-1 ring-inset focus:ring-2 focus:ring-techmania-blue sm:text-sm sm:leading-6 ${
+                      !autoRefresh 
+                        ? 'bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-500 ring-gray-200 dark:ring-gray-700 cursor-not-allowed' 
+                        : 'text-gray-900 dark:text-white dark:bg-gray-700 ring-gray-300 dark:ring-gray-600'
+                    }`}
+                  >
+                    <option value="10">{t('10seconds')}</option>
+                    <option value="30">{t('30seconds')}</option>
+                    <option value="60">{t('1minute')}</option>
+                    <option value="300">{t('5minutes')}</option>
+                  </select>
+                  {!autoRefresh && (
+                    <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                      Zapněte automatickou aktualizaci pro změnu intervalu
+                    </p>
+                  )}
+                </div>
               </div>
             </div>
           </div>

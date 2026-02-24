@@ -18,7 +18,6 @@ from .data_loader import (
 
 from .weather_processor import (
     get_weather_for_date,
-    fill_missing_weather_features,
     estimate_precipitation_probability
 )
 
@@ -29,8 +28,6 @@ from .holiday_processor import (
 )
 
 from .feature_processor import (
-    prepare_features_for_prediction,
-    handle_missing_features,
     convert_to_numeric,
     add_google_trend_feature
 )
@@ -52,13 +49,10 @@ __all__ = [
     'load_template_2026',
     'combine_historical_and_new',
     'get_weather_for_date',
-    'fill_missing_weather_features',
     'estimate_precipitation_probability',
     'get_holiday_features',
     'get_holiday_from_template',
     'get_holiday_from_api',
-    'prepare_features_for_prediction',
-    'handle_missing_features',
     'convert_to_numeric',
     'add_google_trend_feature',
     'predict_with_models',

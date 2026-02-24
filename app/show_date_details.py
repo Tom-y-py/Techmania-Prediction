@@ -59,11 +59,6 @@ if rec:
     print(f"  Max: {rec.temperature_max}°C")
     print(f"  Min: {rec.temperature_min}°C")
     print(f"  Průměr: {rec.temperature_mean}°C")
-    print(f"  Pocitová max: {rec.apparent_temp_max}°C")
-    print(f"  Pocitová min: {rec.apparent_temp_min}°C")
-    print(f"  Pocitová průměr: {rec.apparent_temp_mean}°C")
-    print(f"  Rozdíl pocitové: {rec.feels_like_delta}°C")
-    print(f"  3-denní trend: {rec.temperature_trend_3d}°C")
     
     # Počasí - srážky
     print("\n🌧️ POČASÍ - SRÁŽKY:")
@@ -78,14 +73,6 @@ if rec:
     print("\n💨 POČASÍ - VÍTR:")
     print(f"  Rychlost: {rec.wind_speed} m/s")
     print(f"  Max poryvy: {rec.wind_gusts_max} m/s")
-    print(f"  Směr: {rec.wind_direction}°")
-    
-    # Počasí - slunce a oblačnost
-    print("\n☀️ POČASÍ - SLUNCE & OBLAČNOST:")
-    print(f"  Slunce trvání: {rec.sunshine_duration}s")
-    print(f"  Denní světlo trvání: {rec.daylight_duration}s")
-    print(f"  Poměr slunce: {rec.sunshine_ratio}")
-    print(f"  Oblačnost: {rec.cloud_cover_percent}%")
     
     # Počasí - vypočítané
     print("\n🔧 POČASÍ - VYPOČÍTANÉ PŘÍZNAKY:")
@@ -93,8 +80,6 @@ if rec:
     print(f"  Sníh: {rec.is_snowy}")
     print(f"  Větrno: {rec.is_windy}")
     print(f"  Pěkné počasí: {rec.is_nice_weather}")
-    print(f"  Důvěra předpovědi: {rec.weather_forecast_confidence}")
-    print(f"  Počasí se zlepšuje: {rec.is_weather_improving}")
     
     # Ostatní
     print("\n🔍 OSTATNÍ:")

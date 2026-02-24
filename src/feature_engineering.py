@@ -146,11 +146,9 @@ def create_features(df: pd.DataFrame) -> pd.DataFrame:
     # Pokud data obsahují weather sloupce, použijeme je přímo
     weather_cols = [
         'temperature_max', 'temperature_min', 'temperature_mean',
-        'apparent_temp_max', 'apparent_temp_min', 'apparent_temp_mean',
         'precipitation', 'rain', 'snowfall', 'precipitation_hours',
-        'weather_code', 'wind_speed_max', 'wind_gusts_max', 'wind_direction',
-        'sunshine_duration', 'daylight_duration',
-        'is_rainy', 'is_snowy', 'is_windy', 'is_nice_weather', 'sunshine_ratio'
+        'weather_code', 'wind_speed_max', 'wind_gusts_max',
+        'is_rainy', 'is_snowy', 'is_windy', 'is_nice_weather'
     ]
     
     weather_present = [col for col in weather_cols if col in df.columns]

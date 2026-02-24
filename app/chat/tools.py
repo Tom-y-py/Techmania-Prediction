@@ -628,7 +628,7 @@ def _get_holidays(db, year: int) -> str:
                     is_h, name = holiday_service.is_holiday(d)
                     if is_h and name:
                         result.append(f"- **{d.strftime('%d.%m.%Y')}** ({d.strftime('%A')}): {name}")
-                except:
+                except Exception:
                     pass
         return f"Svátky v roce {year}:\n" + "\n".join(result) if result else f"Žádné svátky nenalezeny pro rok {year}"
     
@@ -805,7 +805,7 @@ def _get_day_of_week_stats(db) -> str:
             try:
                 d = datetime.strptime(str(r.date), "%Y-%m-%d")
                 day_stats[d.weekday()].append(r.total_visitors)
-            except:
+            except Exception:
                 pass
     
     result = ["**Průměrná návštěvnost podle dne v týdnu:**\n"]
@@ -834,7 +834,7 @@ def _get_monthly_stats(db, year: Optional[int] = None) -> str:
             try:
                 d = datetime.strptime(str(r.date), "%Y-%m-%d")
                 month_stats[d.month].append(r.total_visitors)
-            except:
+            except Exception:
                 pass
     
     year_str = f" za rok {year}" if year else ""
@@ -1108,7 +1108,7 @@ def _analyze_trends(db, period: str = "monthly", year: Optional[int] = None) -> 
                     if key not in monthly:
                         monthly[key] = []
                     monthly[key].append(r.total_visitors)
-                except:
+                except Exception:
                     pass
         
         result.append("**Měsíční průměry:**")
@@ -1137,7 +1137,7 @@ def _analyze_trends(db, period: str = "monthly", year: Optional[int] = None) -> 
                         seasons["Podzim"].append(r.total_visitors)
                     else:
                         seasons["Zima"].append(r.total_visitors)
-                except:
+                except Exception:
                     pass
         
         result.append("**Sezónní průměry:**")
@@ -1157,7 +1157,7 @@ def _analyze_trends(db, period: str = "monthly", year: Optional[int] = None) -> 
                     if d.year not in yearly:
                         yearly[d.year] = []
                     yearly[d.year].append(r.total_visitors)
-                except:
+                except Exception:
                     pass
         
         result.append("**Roční přehled:**")
@@ -1182,7 +1182,7 @@ def _analyze_trends(db, period: str = "monthly", year: Optional[int] = None) -> 
                 try:
                     d = datetime.strptime(str(r.date), "%Y-%m-%d")
                     weekdays[d.weekday()].append(r.total_visitors)
-                except:
+                except Exception:
                     pass
         
         result.append("**Průměr podle dne v týdnu:**")
@@ -1221,7 +1221,7 @@ def _get_weather_impact(db, year: Optional[int] = None, season: Optional[str] = 
                     d = datetime.strptime(str(r.date), "%Y-%m-%d")
                     if d.month in months:
                         filtered.append(r)
-                except:
+                except Exception:
                     pass
             records = filtered
     
@@ -1402,7 +1402,7 @@ def _get_best_worst_periods(db, granularity: str = "month", year: Optional[int] 
             periods[key]["total"] += r.total_visitors
             periods[key]["count"] += 1
             periods[key]["days"].append(r.total_visitors)
-        except:
+        except Exception:
             pass
     
     # Seřadit podle průměru
@@ -1467,7 +1467,7 @@ def _get_visitor_segments(db, year: Optional[int] = None, month: Optional[int] =
                 weekday_segments[d.weekday()]["school"] += r.school_visitors or 0
                 weekday_segments[d.weekday()]["public"] += r.public_visitors or 0
                 weekday_segments[d.weekday()]["total"] += r.total_visitors or 0
-            except:
+            except Exception:
                 pass
     
     result.append("\n**Podle dne v týdnu:**")
@@ -1588,7 +1588,7 @@ def _compare_similar_periods(db, period_type: str, period_value: str) -> str:
                 if year not in yearly_data:
                     yearly_data[year] = []
                 yearly_data[year].append(r.total_visitors)
-        except:
+        except Exception:
             pass
     
     if not yearly_data:
