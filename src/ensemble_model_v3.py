@@ -565,16 +565,39 @@ def main():
     predictions_dict['CatBoost'] = cat_val_pred
     print(f"  ✓ CatBoost MAE: {mean_absolute_error(y_val, cat_val_pred):.2f}")
     
-    # Optimize ensemble weights
-    optimal_weights = optimize_ensemble_weights(predictions_dict, y_val)
+    # Leakage mitigace: rozdělit validační sadu na tuning + holdout reporting.
+    split_idx = int(len(y_val) * 0.5)
+    if split_idx <= 0:
+        split_idx = 1
+    if split_idx >= len(y_val):
+        split_idx = len(y_val) - 1
+
+    if split_idx > 0 and split_idx < len(y_val):
+        y_tune = y_val.iloc[:split_idx]
+        y_holdout = y_val.iloc[split_idx:]
+        X_holdout = X_val.iloc[split_idx:]
+        predictions_tune = {name: preds[:split_idx] for name, preds in predictions_dict.items()}
+        predictions_holdout = {name: preds[split_idx:] for name, preds in predictions_dict.items()}
+    else:
+        # Fallback pouze pro extrémně malé datasety
+        y_tune = y_val
+        y_holdout = y_val
+        X_holdout = X_val
+        predictions_tune = predictions_dict
+        predictions_holdout = predictions_dict
+
+    # Optimalizace vah pouze na tuning části
+    optimal_weights = optimize_ensemble_weights(predictions_tune, y_tune)
     
-    # Final ensemble prediction
-    ensemble_pred = sum(predictions_dict[name] * optimal_weights[name] 
-                        for name in predictions_dict.keys())
+    # Finální report pouze na holdout části
+    ensemble_pred = sum(
+        predictions_holdout[name] * optimal_weights[name]
+        for name in predictions_holdout.keys()
+    )
     
-    # Final metrics
-    ensemble_mae = mean_absolute_error(y_val, ensemble_pred)
-    ensemble_r2 = r2_score(y_val, ensemble_pred)
+    # Final metrics na holdoutu
+    ensemble_mae = mean_absolute_error(y_holdout, ensemble_pred)
+    ensemble_r2 = r2_score(y_holdout, ensemble_pred)
     
     print("\n" + "=" * 80)
     print("🎯 FINAL ENSEMBLE RESULTS")
@@ -587,15 +610,15 @@ def main():
     print("📊 MAE BREAKDOWN (Weekday vs Weekend)")
     print("=" * 80)
     
-    # Split validační sadu na víkendy a všední dny
-    is_weekend_val = X_val['is_weekend'] == 1
+    # Split holdout sadu na víkendy a všední dny
+    is_weekend_val = X_holdout['is_weekend'] == 1
     weekday_mask = ~is_weekend_val
     weekend_mask = is_weekend_val
     
     # Vypočítat MAE pro každou skupinu
     if weekday_mask.sum() > 0:
-        mae_weekday = mean_absolute_error(y_val[weekday_mask], ensemble_pred[weekday_mask])
-        residuals_weekday = np.abs(y_val[weekday_mask].values - ensemble_pred[weekday_mask])
+        mae_weekday = mean_absolute_error(y_holdout[weekday_mask], ensemble_pred[weekday_mask])
+        residuals_weekday = np.abs(y_holdout[weekday_mask].values - ensemble_pred[weekday_mask])
         print(f"  Weekday MAE: {mae_weekday:.2f} (n={weekday_mask.sum()})")
     else:
         mae_weekday = ensemble_mae
@@ -603,8 +626,8 @@ def main():
         print("  ⚠️ No weekday data in validation set")
     
     if weekend_mask.sum() > 0:
-        mae_weekend = mean_absolute_error(y_val[weekend_mask], ensemble_pred[weekend_mask])
-        residuals_weekend = np.abs(y_val[weekend_mask].values - ensemble_pred[weekend_mask])
+        mae_weekend = mean_absolute_error(y_holdout[weekend_mask], ensemble_pred[weekend_mask])
+        residuals_weekend = np.abs(y_holdout[weekend_mask].values - ensemble_pred[weekend_mask])
         print(f"  Weekend MAE: {mae_weekend:.2f} (n={weekend_mask.sum()})")
     else:
         mae_weekend = ensemble_mae

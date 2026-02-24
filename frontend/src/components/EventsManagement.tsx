@@ -142,7 +142,7 @@ export default function EventsManagement({ startDate, endDate }: EventsManagemen
           </div>
 
           <div className="grid gap-4">
-            {data.events.map((event) => (
+            {data.events.map((event: EventResponse) => (
               <div
                 key={event.id}
                 className="border rounded-lg p-4 hover:shadow-md transition"

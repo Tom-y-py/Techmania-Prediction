@@ -66,9 +66,6 @@ class HistoricalData(Base):
     temperature_max = Column(Float)
     temperature_min = Column(Float)
     temperature_mean = Column(Float)
-    apparent_temp_max = Column(Float)
-    apparent_temp_min = Column(Float)
-    apparent_temp_mean = Column(Float)
     
     # Weather - Precipitation
     precipitation = Column(Float)
@@ -81,23 +78,12 @@ class HistoricalData(Base):
     # Weather - Wind
     wind_speed = Column(Float)
     wind_gusts_max = Column(Float)
-    wind_direction = Column(Integer)
-    
-    # Weather - Sun & Cloud
-    sunshine_duration = Column(Float)
-    daylight_duration = Column(Float)
-    sunshine_ratio = Column(Float)
-    cloud_cover_percent = Column(Float)
     
     # Weather - Computed features
     is_rainy = Column(Integer)
     is_snowy = Column(Integer)
     is_windy = Column(Integer)
     is_nice_weather = Column(Integer)
-    feels_like_delta = Column(Float)
-    weather_forecast_confidence = Column(Float)
-    temperature_trend_3d = Column(Float)
-    is_weather_improving = Column(Integer)
     
     # Additional features
     google_trend = Column(Float)
@@ -165,9 +151,6 @@ class TemplateData(Base):
     temperature_max = Column(Float, nullable=True)
     temperature_min = Column(Float, nullable=True)
     temperature_mean = Column(Float, nullable=True)
-    apparent_temp_max = Column(Float, nullable=True)
-    apparent_temp_min = Column(Float, nullable=True)
-    apparent_temp_mean = Column(Float, nullable=True)
     
     # Weather - Precipitation
     precipitation = Column(Float, nullable=True)
@@ -180,23 +163,12 @@ class TemplateData(Base):
     # Weather - Wind
     wind_speed = Column(Float, nullable=True)
     wind_gusts_max = Column(Float, nullable=True)
-    wind_direction = Column(Integer, nullable=True)
-    
-    # Weather - Sun & Cloud
-    sunshine_duration = Column(Float, nullable=True)
-    daylight_duration = Column(Float, nullable=True)
-    sunshine_ratio = Column(Float, nullable=True)
-    cloud_cover_percent = Column(Float, nullable=True)
     
     # Weather - Computed features
     is_rainy = Column(Integer, nullable=True)
     is_snowy = Column(Integer, nullable=True)
     is_windy = Column(Integer, nullable=True)
     is_nice_weather = Column(Integer, nullable=True)
-    feels_like_delta = Column(Float, nullable=True)
-    weather_forecast_confidence = Column(Float, nullable=True)
-    temperature_trend_3d = Column(Float, nullable=True)
-    is_weather_improving = Column(Integer, nullable=True)
     
     # Additional features
     google_trend = Column(Float, nullable=True)

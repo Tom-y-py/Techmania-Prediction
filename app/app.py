@@ -54,9 +54,9 @@ config.print_info()
 try:
     from database import (
         get_db, init_db, SessionLocal, Prediction, HistoricalData, TemplateData, Event,
-        get_next_version, validate_future_date, mark_template_complete,
+        get_next_version, mark_template_complete,
         get_complete_template_records, get_latest_prediction,
-        get_events_for_date, get_events_for_range, update_template_event_flag
+        get_events_for_date as db_get_events_for_date, get_events_for_range, update_template_event_flag
     )
     from init_db import load_historical_data, load_template_data
     DATABASE_ENABLED = True
@@ -103,6 +103,41 @@ ensemble_weights = None
 ensemble_info = None  # Nová: informace o typu ensemble (weighted/stacking/single_lgb)
 meta_model = None  # Nová: meta-model pro stacking
 historical_data = None  # Pro ukládání historických dat
+
+
+def normalize_historical_mae(mae_value: Any) -> Optional[Dict[str, float]]:
+    """Normalizuje historical_mae artifact na dict s weekday/weekend."""
+    if mae_value is None:
+        return None
+
+    if isinstance(mae_value, (int, float)):
+        value = float(mae_value)
+        if value < 0:
+            raise ValueError(f"historical_mae musí být nezáporné číslo, získáno: {value}")
+        return {"weekday": value, "weekend": value, "overall": value}
+
+    if isinstance(mae_value, dict):
+        if "weekday" in mae_value and "weekend" in mae_value:
+            weekday = float(mae_value["weekday"])
+            weekend = float(mae_value["weekend"])
+            if weekday < 0 or weekend < 0:
+                raise ValueError("historical_mae obsahuje záporné hodnoty")
+            normalized = dict(mae_value)
+            normalized["weekday"] = weekday
+            normalized["weekend"] = weekend
+            if "overall" not in normalized:
+                normalized["overall"] = float((weekday + weekend) / 2.0)
+            return normalized
+        if "mae" in mae_value and isinstance(mae_value["mae"], (int, float)):
+            value = float(mae_value["mae"])
+            if value < 0:
+                raise ValueError(f"historical_mae.mae musí být nezáporné číslo, získáno: {value}")
+            return {"weekday": value, "weekend": value, "overall": value}
+
+    raise ValueError(
+        "Nevalidní historical_mae artifact. Očekáváno číslo nebo dict s klíči "
+        "'weekday' a 'weekend'."
+    )
 
 
 # Pydantic modely pro request/response
@@ -424,19 +459,20 @@ async def load_models():
                 models["trend_features"] = joblib.load(MODELS_DIR / "trend_feature_names_v3.pkl")
                 print(f"   - Google Trend Predictor: načten ✅")
             
-            ensemble_info = {"type": "weighted", "mae": None}
+            ensemble_info = {"type": "weighted", "mae": None, "historical_mae": None}
             mae_path = MODELS_DIR / "historical_mae_v3.pkl"
             if mae_path.exists():
                 mae_value = joblib.load(mae_path)
-                # MAE může být buď float nebo dict
-                if isinstance(mae_value, dict):
-                    ensemble_info["mae"] = mae_value.get("mae", None)
-                else:
-                    ensemble_info["mae"] = mae_value
+                ensemble_info["historical_mae"] = normalize_historical_mae(mae_value)
+                ensemble_info["mae"] = ensemble_info["historical_mae"].get("overall")
             
             print(f"   - Ensemble type: WEIGHTED V3")
-            if ensemble_info.get("mae") is not None:
-                print(f"   - Ensemble MAE: {ensemble_info['mae']:.2f}")
+            if ensemble_info.get("historical_mae") is not None:
+                print(
+                    "   - Historical MAE loaded "
+                    f"(weekday={ensemble_info['historical_mae']['weekday']:.2f}, "
+                    f"weekend={ensemble_info['historical_mae']['weekend']:.2f})"
+                )
         else:
             # Fallback na staré modely
             print("   ⚠️ V3 modely nenalezeny, používám staré modely")
@@ -450,6 +486,9 @@ async def load_models():
             ensemble_info_path = MODELS_DIR / "ensemble_info.pkl"
             if ensemble_info_path.exists():
                 ensemble_info = joblib.load(ensemble_info_path)
+                ensemble_info["historical_mae"] = normalize_historical_mae(
+                    ensemble_info.get("historical_mae", ensemble_info.get("mae"))
+                )
                 print(
                     f"   - Ensemble type: {ensemble_info.get('type', 'weighted').upper()}"
                 )
@@ -466,7 +505,7 @@ async def load_models():
                         ensemble_info["type"] = "weighted"
             else:
                 # Starší modely bez ensemble_info = weighted
-                ensemble_info = {"type": "weighted", "mae": None}
+                ensemble_info = {"type": "weighted", "mae": None, "historical_mae": None}
                 print(f"   - Ensemble type: WEIGHTED (legacy)")
 
         # Načtení historických dat z databáze pro statistiky
@@ -680,7 +719,7 @@ async def get_today_prediction():
             'weights': ensemble_weights,
             'feature_cols': feature_columns,
             'google_trend_predictor': models.get('google_trend_predictor'),
-            'historical_mae': ensemble_info.get('mae') if ensemble_info else None,
+            'historical_mae': ensemble_info.get('historical_mae') if ensemble_info else None,
             'ensemble_type': ensemble_info.get('type', 'weighted') if ensemble_info else 'weighted'
         }
         
@@ -692,7 +731,7 @@ async def get_today_prediction():
             "is_historical": False,
             "day_of_week": today.strftime("%A"),
             "is_weekend": today.weekday() >= 5,
-            "is_holiday": False,  # TODO: extract from result
+            "is_holiday": bool(result.get("is_holiday", False)),
             "weather": {
                 "temperature_mean": result['weather']['temperature'],
                 "precipitation": result['weather']['precipitation'],
@@ -862,7 +901,7 @@ async def get_calendar_events(month: int = None, year: int = None):
         
         # Načíst data z databáze (TemplateData pro 2026)
         if DATABASE_ENABLED:
-            db = next(get_db())
+            db = SessionLocal()
             try:
                 start_str = f"{year}-{month:02d}-01"
                 end_str = f"{year}-{month:02d}-{num_days:02d}"
@@ -956,7 +995,9 @@ async def predict(
     Automaticky detekuje svátky a získává informace o počasí.
     Uloží predikci do databáze s verzováním.
     
-    DŮLEŽITÉ: Nepřijímá predikce do minulosti (pouze budoucí data).
+    DŮLEŽITÉ:
+    - Predikce do minulosti je povolena pouze pro data starší než 5 dní
+      (kvůli dostupnosti historických dat počasí v Open-Meteo Archive API).
     MAX 16 DNÍ DOPŘEDU (limit Weather API).
     """
     if not models:
@@ -969,13 +1010,19 @@ async def predict(
         pred_date = pd.to_datetime(request.date).date()
         today = date.today()
         
-        # Validace: zakázat predikce do minulosti
-        if DATABASE_ENABLED and not validate_future_date(pred_date):
-            raise HTTPException(
-                status_code=400,
-                detail=f"Nelze vytvořit predikci do minulosti. Požadované datum: {pred_date}, Dnešní datum: {today}."
-            )
-        
+        # Validace: historická predikce je povolena pouze pro data starší než 5 dní
+        if pred_date < today:
+            days_in_past = (today - pred_date).days
+            if days_in_past <= 5:
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        "Nelze vytvořit predikci pro posledních 5 dní zpětně, "
+                        "protože historická data počasí ještě nejsou dostupná. "
+                        "Zvolte datum starší než 5 dní."
+                    ),
+                )
+
         # Validace: max 16 dní dopředu
         days_ahead = (pred_date - today).days
         if days_ahead > 16:
@@ -992,7 +1039,7 @@ async def predict(
             'weights': ensemble_weights,
             'feature_cols': feature_columns,
             'google_trend_predictor': models.get('google_trend_predictor'),
-            'historical_mae': ensemble_info.get('mae') if ensemble_info else None,
+            'historical_mae': ensemble_info.get('historical_mae') if ensemble_info else None,
             'ensemble_type': ensemble_info.get('type', 'weighted') if ensemble_info else 'weighted'
         }
         
@@ -1002,6 +1049,9 @@ async def predict(
         prediction = result['ensemble_prediction']
         confidence_interval = result['confidence_interval']
         weather_info = result['weather']
+        holiday_info_data = holiday_service.get_holiday_info(pred_date)
+        is_nice_weather = bool(weather_info.get("is_nice_weather", False))
+        wind_speed_value = weather_info.get("wind_speed_max", weather_info.get("wind_speed", 0))
 
         # Uložit predikci do databáze
         if DATABASE_ENABLED and db is not None:
@@ -1015,13 +1065,13 @@ async def predict(
                     predicted_visitors=prediction,
                     temperature_mean=weather_info.get("temperature"),
                     precipitation=weather_info.get("precipitation"),
-                    wind_speed_max=weather_info.get("rain", 0),
+                    wind_speed_max=wind_speed_value,
                     is_rainy=1 if weather_info.get("rain", 0) > 0 else 0,
                     is_snowy=1 if weather_info.get("snowfall", 0) > 0 else 0,
-                    is_nice_weather=0,
+                    is_nice_weather=1 if is_nice_weather else 0,
                     day_of_week=day_of_week_cz,
                     is_weekend=1 if pred_date.weekday() >= 5 else 0,
-                    is_holiday=0,
+                    is_holiday=1 if holiday_info_data.get("is_holiday", False) else 0,
                     model_name="ensemble",
                     confidence_lower=confidence_interval[0],
                     confidence_upper=confidence_interval[1],
@@ -1047,15 +1097,20 @@ async def predict(
                 "models": list(result['individual_predictions'].keys()),
                 "weights": result.get("model_weights", {}),
             },
-            "holiday_info": {"is_holiday": False, "holiday_name": None},
+            "holiday_info": {
+                "is_holiday": bool(holiday_info_data.get("is_holiday", False)),
+                "holiday_name": holiday_info_data.get("holiday_name"),
+            },
             "weather_info": {
                 "temperature_mean": float(weather_info["temperature"]),
                 "precipitation": float(weather_info["precipitation"]),
                 "weather_description": weather_info.get("description", "N/A"),
-                "is_nice_weather": False,
+                "is_nice_weather": is_nice_weather,
             },
         }
 
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Chyba při predikci: {str(e)}")
 
@@ -1073,11 +1128,9 @@ async def predict_range(
 
     Použije refaktorovaný predict_date_range.
     
-    Parametry:
-    - backtest: Pokud True, povolí predikce pro historická data (pro testování přesnosti modelu)
-    
     DŮLEŽITÉ: 
-    - Bez backtest=True nepřijímá predikce do minulosti
+    - Predikce do minulosti je povolena pouze pro data starší než 5 dní
+      (kvůli dostupnosti historických dat počasí v Open-Meteo Archive API).
     - MAX 16 DNÍ DOPŘEDU pro budoucí data (limit Weather API forecast)
     """
     if not models:
@@ -1093,7 +1146,26 @@ async def predict_range(
         if start_date > end_date:
             raise HTTPException(status_code=400, detail="start_date musí být před end_date")
         
-        # Validace pro backtest vs normální predikce
+        # Validace: interval nesmí zasáhnout posledních 5 dní zpětně,
+        # protože pro ně nejsou v Archive API dostupná historická data počasí.
+        recent_past_boundary = today - timedelta(days=5)
+        if start_date.date() < today and end_date.date() >= recent_past_boundary:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "Nelze vytvořit predikci pro období zasahující do posledních 5 dní zpětně, "
+                    "protože historická data počasí ještě nejsou dostupná. "
+                    f"Zvolte období končící nejpozději {recent_past_boundary - timedelta(days=1)}."
+                ),
+            )
+
+        max_date = today + timedelta(days=16)
+        if end_date.date() > max_date:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Nelze vytvořit predikci více než 16 dní dopředu. Maximální datum: {max_date}"
+            )
+
         if backtest:
             if end_date.date() > today:
                 raise HTTPException(
@@ -1101,19 +1173,6 @@ async def predict_range(
                     detail=f"Backtest je pouze pro historická data. End datum: {end_date.date()} je v budoucnosti."
                 )
             print(f"🔬 BACKTEST MODE: {start_date.date()} - {end_date.date()}")
-        else:
-            if DATABASE_ENABLED and start_date.date() < today:
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"Nelze vytvořit predikci do minulosti. Použijte parametr backtest=true"
-                )
-            
-            max_date = today + timedelta(days=16)
-            if end_date.date() > max_date:
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"Nelze vytvořit predikci více než 16 dní dopředu. Maximální datum: {max_date}"
-                )
         
         # Připravit models_dict
         models_dict = {
@@ -1123,7 +1182,7 @@ async def predict_range(
             "weights": ensemble_weights,
             "feature_cols": feature_columns,
             "google_trend_predictor": models.get('google_trend_predictor'),
-            "historical_mae": ensemble_info.get('mae') if ensemble_info else None,
+            "historical_mae": ensemble_info.get('historical_mae') if ensemble_info else None,
             "ensemble_type": ensemble_info.get("type", "weighted") if ensemble_info else "weighted",
             "meta_model": meta_model,
         }
@@ -2081,7 +2140,7 @@ async def get_events(
 
 
 @app.get("/events/{date_str}", tags=["Events"])
-async def get_events_for_date(
+async def get_events_for_date_endpoint(
     date_str: str,
     db: Session = Depends(get_db) if DATABASE_ENABLED else None
 ):
@@ -2095,7 +2154,7 @@ async def get_events_for_date(
     
     try:
         event_date = pd.to_datetime(date_str).date()
-        events = get_events_for_date(db, event_date)
+        events = db_get_events_for_date(db, event_date)
         
         events_list = []
         for event in events:

@@ -506,7 +506,7 @@ def main():
     print(f"   Total columns: {len(df.columns)}")
     
     # Ověřit, že máme weather data
-    weather_cols = ['temperature_mean', 'precipitation', 'weather_code', 'cloud_cover_percent']
+    weather_cols = ['temperature_mean', 'precipitation', 'weather_code']
     has_weather = all(col in df.columns for col in weather_cols)
     print(f"   Weather data present: {'✅ YES' if has_weather else '❌ NO'}")
     
@@ -541,25 +541,10 @@ def main():
     X_val = val[numeric_features]
     y_val = val['total_visitors']
     
-    # === DŮLEŽITÉ: Normalizace dominantního feature 'is_closed' ===
-    # is_closed má obrovskou importance (1+ miliarda), což potlačuje vliv počasí
-    # Snížíme jeho váhu, aby ostatní features (počasí, svátky, atd.) měly větší vliv
-    print("\n🎯 Normalizing 'is_closed' feature to balance importance...")
+    # DŮLEŽITÉ: Žádná ad-hoc transformace is_closed pouze v tréninku.
+    # Tím držíme train/inference feature semantics konzistentní.
     if 'is_closed' in X_train.columns:
-        # Původní hodnoty: 0 nebo 1
-        # Nové hodnoty: 0 nebo 0.1 (10x menší vliv)
-        # Model se tak musí více spoléhat na ostatní features
-        original_closed_count_train = X_train['is_closed'].sum()
-        original_closed_count_val = X_val['is_closed'].sum()
-        
-        X_train['is_closed'] = X_train['is_closed'] * 0.1
-        X_val['is_closed'] = X_val['is_closed'] * 0.1
-        
-        print(f"   Train: {original_closed_count_train} zavřených dní → váha snížena na 0.1")
-        print(f"   Val: {original_closed_count_val} zavřených dní → váha snížena na 0.1")
-        print(f"   ✅ Weather a ostatní features nyní dostanou větší prostor!")
-    else:
-        print("   ⚠️ Feature 'is_closed' nebyl nalezen")
+        print("\n✓ Feature 'is_closed' ponechán bez tréninkové normalizace (train/inference parity).")
     
     # 4. Trénovat modely
     lgb_model, lgb_pred = train_lightgbm(X_train, y_train, X_val, y_val)

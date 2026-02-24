@@ -51,7 +51,7 @@ export function usePrediction() {
   
   const predictSingleDate = useCallback(
     async (date: string) => {
-      return execute(() => api.predictVisitors({ date }));
+      return execute(() => api.predict({ date }));
     },
     [execute]
   );
@@ -169,15 +169,12 @@ export function useChat() {
       setError(null);
 
       try {
-        const response = await api.chatSync({
-          message,
-          history: messages,
-        });
+        const response = await api.chatSync(message, messages);
 
-        setMessages((prev) => [
+        setMessages((prev: Array<{ role: string; content: string }>) => [
           ...prev,
           { role: 'user', content: message },
-          { role: 'assistant', content: response.response },
+          { role: 'assistant', content: response },
         ]);
 
         return response;
