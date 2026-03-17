@@ -1,0 +1,157 @@
+{
+  "latitude": 49.736378,
+  "longitude": 13.414211,
+  "generationtime_ms": 0.5820989608764648,
+  "utc_offset_seconds": 3600,
+  "timezone": "Europe/Prague",
+  "timezone_abbreviation": "GMT+1",
+  "elevation": 329.0,
+  "daily_units": {
+    "time": "iso8601",
+    "temperature_2m_max": "°C",
+    "temperature_2m_min": "°C",
+    "temperature_2m_mean": "°C",
+    "apparent_temperature_max": "°C",
+    "apparent_temperature_min": "°C",
+    "apparent_temperature_mean": "°C",
+    "precipitation_sum": "mm",
+    "rain_sum": "mm",
+    "snowfall_sum": "cm",
+    "precipitation_hours": "h",
+    "weathercode": "wmo code",
+    "windspeed_10m_max": "km/h",
+    "windgusts_10m_max": "km/h",
+    "winddirection_10m_dominant": "°",
+    "sunrise": "iso8601",
+    "sunset": "iso8601",
+    "sunshine_duration": "s",
+    "daylight_duration": "s",
+    "uv_index_max": "undefined",
+    "uv_index_clear_sky_max": "undefined",
+    "shortwave_radiation_sum": "MJ/m²",
+    "cloudcover_mean": "%",
+    "et0_fao_evapotranspiration": "mm"
+  },
+  "daily": {
+    "time": [
+      "2026-02-16",
+      "2026-02-17",
+      "2026-02-18"
+    ],
+    "temperature_2m_max": [
+      3.2,
+      4.3,
+      3.9
+    ],
+    "temperature_2m_min": [
+      -4.3,
+      -0.2,
+      -0.4
+    ],
+    "temperature_2m_mean": [
+      -0.9,
+      1.6,
+      1.3
+    ],
+    "apparent_temperature_max": [
+      0.1,
+      0.0,
+      -0.2
+    ],
+    "apparent_temperature_min": [
+      -9.1,
+      -4.4,
+      -4.8
+    ],
+    "apparent_temperature_mean": [
+      -4.4,
+      -2.3,
+      -3.0
+    ],
+    "precipitation_sum": [
+      4.7,
+      2.2,
+      0.5
+    ],
+    "rain_sum": [
+      0.4,
+      0.6,
+      0.1
+    ],
+    "snowfall_sum": [
+      3.01,
+      1.12,
+      0.28
+    ],
+    "precipitation_hours": [
+      11.0,
+      8.0,
+      5.0
+    ],
+    "weathercode": [
+      73,
+      73,
+      71
+    ],
+    "windspeed_10m_max": [
+      13.5,
+      15.9,
+      19.0
+    ],
+    "windgusts_10m_max": [
+      31.3,
+      35.3,
+      40.3
+    ],
+    "winddirection_10m_dominant": [
+      176,
+      254,
+      261
+    ],
+    "sunrise": [
+      "2026-02-16T07:14",
+      "2026-02-17T07:12",
+      "2026-02-18T07:10"
+    ],
+    "sunset": [
+      "2026-02-16T17:26",
+      "2026-02-17T17:28",
+      "2026-02-18T17:29"
+    ],
+    "sunshine_duration": [
+      3327.48,
+      28628.1,
+      13548.31
+    ],
+    "daylight_duration": [
+      36717.32,
+      36930.3,
+      37144.76
+    ],
+    "uv_index_max": [
+      null,
+      null,
+      null
+    ],
+    "uv_index_clear_sky_max": [
+      null,
+      null,
+      null
+    ],
+    "shortwave_radiation_sum": [
+      4.06,
+      6.63,
+      5.45
+    ],
+    "cloudcover_mean": [
+      98,
+      86,
+      90
+    ],
+    "et0_fao_evapotranspiration": [
+      0.46,
+      0.67,
+      0.77
+    ]
+  }
+}
